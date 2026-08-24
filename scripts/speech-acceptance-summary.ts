@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const inputDirectory = path.resolve(process.env.VIDEO_AGENT_ACCEPTANCE_RESULTS ?? "evals/results");
@@ -50,7 +50,9 @@ function providerFor(report: AcceptanceReport, stage: Stage): ProviderInfo | und
   return report.providers?.voice ?? report.providers?.tts;
 }
 
-const entries = await readdir(inputDirectory, { withFileTypes: true }).catch(() => []);
+await mkdir(inputDirectory, { recursive: true });
+await Promise.all([mkdir(path.dirname(jsonOutput), { recursive: true }), mkdir(path.dirname(markdownOutput), { recursive: true })]);
+const entries = await readdir(inputDirectory, { withFileTypes: true });
 const files = entries.filter((entry) => entry.isFile() && /^real-speech-acceptance-.*\.json$/u.test(entry.name)).map((entry) => path.join(inputDirectory, entry.name)).sort();
 const samples: Sample[] = [];
 let invalidReports = 0;
