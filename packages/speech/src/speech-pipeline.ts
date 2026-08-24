@@ -8,9 +8,11 @@ import type {
   ASRProvider,
   ASRResult,
   OperationContext,
-  StructuredGenerationResult,
+  StructuredTextGenerator as StructuredGenerator,
   TTSProvider,
 } from "../../providers/src/contracts.js";
+
+export type { StructuredTextGenerator } from "../../providers/src/contracts.js";
 
 export const translatedSegmentSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -24,28 +26,6 @@ export const speechTranslationSchema = z.object({
 });
 
 export type SpeechTranslation = z.infer<typeof speechTranslationSchema>;
-
-/**
- * Deliberately smaller than LLMProvider. The speech-only MCP needs generic
- * structured generation, not editing-strategy / EditPlan methods.
- * OpenAILLMProvider already satisfies this at runtime.
- */
-export interface StructuredTextGenerator {
-  readonly id: string;
-  readonly model?: string;
-  generateStructured<T>(request: {
-    requestId: string;
-    projectId?: string;
-    operation: string;
-    instructions: string;
-    input: string;
-    schemaName: string;
-    schema: z.ZodType<T>;
-    jsonSchema: Record<string, unknown>;
-    maxRetries?: number;
-    signal?: AbortSignal;
-  }): Promise<StructuredGenerationResult<T>>;
-}
 
 export interface TranslateOptions {
   targetLanguage: string;
@@ -90,10 +70,9 @@ function compactSource(result: ASRResult) {
 
 export async function translateAsrResult(
   result: ASRResult,
-  generator: StructuredTextGenerator,
+  generator: StructuredGenerator,
   options: TranslateOptions,
 ): Promise<SpeechTranslation> {
-  if (!generator.generateStructured) throw new Error("Selected LLM does not support structured generation");
   const source = compactSource(result);
   if (source.length === 0) throw new Error("ASR returned no segments to translate");
 
