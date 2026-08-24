@@ -27,11 +27,17 @@ class NativeMediaRenderer(private val context: Context) {
       val spec = JSONObject(specJson); val timeline = JSONObject(spec.getString("timelineJson")); val assetsArray = JSONArray(spec.getString("assetsJson")); val assets = mutableMapOf<String, String>(); for (index in 0 until assetsArray.length()) { val item = assetsArray.getJSONObject(index); assets[item.getString("assetId")] = item.getString("uri") }
       val clips = mutableListOf<JSONObject>(); val tracks = timeline.getJSONArray("tracks"); for (trackIndex in 0 until tracks.length()) { val track = tracks.getJSONObject(trackIndex); if (track.optString("type") != "video") continue; val values = track.getJSONArray("clips"); for (clipIndex in 0 until values.length()) clips += values.getJSONObject(clipIndex) }; clips.sortBy { it.getLong("timelineInUs") }
       require(clips.isNotEmpty()) { "INVALID_INPUT: timeline has no video clips" }
-      val effects = Effects(ImmutableList.of(), ImmutableList.of<Effect>(Presentation.createForWidthAndHeight(1280, 720, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)))
+      // Geometry is decided by the portable layer from the timeline and the render mode. This used
+      // to be a hardcoded 1280x720 SCALE_TO_FIT_WITH_CROP, which cropped portrait source to
+      // landscape and capped every final export at 720p. SCALE_TO_FIT letterboxes instead of
+      // discarding picture.
+      val outputWidth = spec.getInt("outputWidth"); val outputHeight = spec.getInt("outputHeight")
+      val effects = Effects(ImmutableList.of(), ImmutableList.of<Effect>(Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT)))
       val edited = clips.map { clip -> val source = requireNotNull(assets[clip.getString("assetId")]); val file = resolve(source); val media = MediaItem.Builder().setUri(Uri.fromFile(file)).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(clip.getLong("sourceInUs") / 1000).setEndPositionMs(clip.getLong("sourceOutUs") / 1000).build()).build(); EditedMediaItem.Builder(media).setRemoveAudio(false).setRemoveVideo(false).setEffects(effects).build() }
       val sequence = EditedMediaItemSequence.Builder(edited).setIsLooping(false).build(); val composition = Composition.Builder(listOf(sequence)).build(); val output = resolve(spec.getString("outputUri")); output.parentFile?.mkdirs(); output.delete(); val jobId = spec.getString("jobId")
       val listener = object : Transformer.Listener {
-        override fun onCompleted(composition: Composition, result: ExportResult) { active.remove(jobId); progress(1.0, "native-complete"); promise.resolve(JSONObject().put("outputUri", spec.getString("outputUri")).put("durationUs", timeline.optLong("durationUs")).put("warnings", JSONArray(listOf("Caption burn-in, speed, ducking and overlays are not implemented"))).toString()) }
+        // Report the duration that was actually written, not the one that was requested.
+        override fun onCompleted(composition: Composition, result: ExportResult) { active.remove(jobId); progress(1.0, "native-complete"); val durationUs = if (result.durationMs > 0) result.durationMs * 1000 else timeline.optLong("durationUs"); promise.resolve(JSONObject().put("outputUri", spec.getString("outputUri")).put("durationUs", durationUs).put("warnings", JSONArray()).toString()) }
         override fun onError(composition: Composition, result: ExportResult, exception: ExportException) { active.remove(jobId); promise.reject("MEDIA_CODEC_UNSUPPORTED", exception.message, exception) }
       }
       val transformer = Transformer.Builder(context).addListener(listener).build(); active[jobId] = transformer; progress(0.02, "native-starting"); transformer.start(composition, output.path)

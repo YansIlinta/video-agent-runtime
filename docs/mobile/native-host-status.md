@@ -41,14 +41,22 @@ Key additions:
 | controlled import | yes | yes | no |
 | native metadata probe | yes | yes | no |
 | trim / concat | yes | yes | no |
-| crop / scale | partial export normalization | Media3 Presentation effect | no |
+| scale to timeline geometry | AVMutableVideoComposition | Media3 `Presentation` (SCALE_TO_FIT) | no |
+| ranged preview | yes | yes | no |
 | preserve source audio | yes | yes | no |
 | preview / final export | yes | yes | no |
+| crop | no | no | no |
 | speed | no | no | no |
 | caption burn-in | no | no | no |
 | ducking / overlay | no | no | no |
 
 `NativeMobileRenderer` rejects unsupported operations before native execution; it does not claim FFmpeg parity.
+
+Output geometry and range selection are decided in `packages/mobile/src/render-plan.ts`, not in the native renderers: final output matches the timeline, preview scales down to the device's `previewMaxWidth` preserving aspect ratio, and a ranged preview is trimmed and rebased before it crosses the bridge. Neither renderer crops — content is fitted, never discarded.
+
+## Transcription
+
+There is none on this host. `UnavailableASRProvider` throws rather than returning a fixture, so an edit cannot be proposed on device until a real ASR provider is configured. See [local-models.md](local-models.md).
 
 ## Secure BYOK and provider behavior
 

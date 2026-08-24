@@ -1,4 +1,5 @@
 import { PortableError, type BackgroundExecutionAdapter, type ClockAdapter, type CryptoAdapter, type FileSystemAdapter, type HostProfile, type HttpAdapter, type IdAdapter, type LogicalUri, type PermissionAdapter, type PlatformCapabilities, type SecureStorageAdapter } from "../../platform/src/contracts.js";
+import { fromBase64, toBase64 } from "./base64.js";
 import type { NativeVideoHostBridge } from "./native-bridge.js";
 
 function mapped(error: unknown): PortableError {
@@ -38,9 +39,12 @@ export class NativeHttpAdapter implements HttpAdapter {
   constructor(private readonly native: NativeVideoHostBridge) {}
   async request(request: Parameters<HttpAdapter["request"]>[0]) {
     if (request.signal?.aborted) throw new PortableError("CANCELLED", "Request cancelled");
-    const body = request.body instanceof Uint8Array ? new TextDecoder().decode(request.body) : request.body;
-    try { const response = await this.native.http({ method: request.method, url: request.url, ...(request.headers ? { headers: request.headers } : {}), ...(body !== undefined ? { body } : {}), ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}), ...(request.stream !== undefined ? { stream: request.stream } : {}) }); return { ...response, body: Uint8Array.from(response.body) }; }
-    catch (error) { throw mapped(error); }
+    // Encode rather than TextDecoder the bytes: decoding corrupts any non-UTF-8 payload silently.
+    const bodyBase64 = request.body === undefined ? undefined : toBase64(request.body instanceof Uint8Array ? request.body : new TextEncoder().encode(request.body));
+    try {
+      const response = await this.native.http({ method: request.method, url: request.url, ...(request.headers ? { headers: request.headers } : {}), ...(bodyBase64 !== undefined ? { bodyBase64 } : {}), ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}), ...(request.stream !== undefined ? { stream: request.stream } : {}) });
+      return { status: response.status, headers: response.headers, body: fromBase64(response.bodyBase64) };
+    } catch (error) { throw mapped(error); }
   }
 }
 

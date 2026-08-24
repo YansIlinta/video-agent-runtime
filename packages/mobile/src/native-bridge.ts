@@ -16,9 +16,12 @@ export interface NativeRenderSpec {
   projectId: string;
   mode: "preview" | "final";
   outputUri: LogicalUri;
+  /** Exact encoder output geometry, already derived from the timeline and the render mode. */
+  outputWidth: number;
+  outputHeight: number;
+  /** Already restricted to the requested range and rebased to zero. Natives render it as given. */
   timelineJson: string;
   assetsJson: string;
-  rangeJson?: string;
 }
 
 export interface NativeRenderResult {
@@ -49,7 +52,11 @@ export interface NativeVideoHostBridge {
   secureGet(key: string): Promise<string | undefined>;
   secureDelete(key: string): Promise<void>;
 
-  http(request: Omit<HttpRequest, "body" | "signal"> & { body?: string }): Promise<{ status: number; headers: Record<string, string>; body: number[] }>;
+  /**
+   * Bodies cross as base64. They previously crossed as UTF-8 text in and an integer array out,
+   * which silently corrupted any non-text payload and made a real audio upload impossible.
+   */
+  http(request: Omit<HttpRequest, "body" | "signal"> & { bodyBase64?: string }): Promise<{ status: number; headers: Record<string, string>; bodyBase64: string }>;
   scheduleBackground(task: BackgroundTaskRequest): Promise<void>;
   cancelBackground(id: string): Promise<void>;
   pendingBackground(): Promise<BackgroundTaskRequest[]>;

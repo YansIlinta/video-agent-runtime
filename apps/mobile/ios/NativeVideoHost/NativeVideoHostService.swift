@@ -64,12 +64,50 @@ import UIKit
   public func renderJSON(_ specJSON: String) async throws -> String {
     let spec = try JSONSerialization.jsonObject(with: Data(specJSON.utf8)) as! [String: Any]; let timeline = try JSONSerialization.jsonObject(with: Data((spec["timelineJson"] as! String).utf8)) as! [String: Any]; let assets = try JSONSerialization.jsonObject(with: Data((spec["assetsJson"] as! String).utf8)) as! [[String: Any]]; let uriById = Dictionary(uniqueKeysWithValues: assets.compactMap { item in (item["assetId"] as? String).flatMap { id in (item["uri"] as? String).map { (id, $0) } } }); let composition = AVMutableComposition(); guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw hostError("MEDIA_CODEC_UNSUPPORTED", "Unable to create video track") }; let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid); var cursor = CMTime.zero
     let tracks = timeline["tracks"] as? [[String: Any]] ?? []; let clips = tracks.filter { ($0["type"] as? String) == "video" }.flatMap { $0["clips"] as? [[String: Any]] ?? [] }.sorted { ($0["timelineInUs"] as? NSNumber)?.int64Value ?? 0 < ($1["timelineInUs"] as? NSNumber)?.int64Value ?? 0 }
-    for clip in clips { guard let assetId = clip["assetId"] as? String, let uri = uriById[assetId] else { continue }; let asset = AVURLAsset(url: try resolve(uri)); guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw hostError("MEDIA_CODEC_UNSUPPORTED", "Missing video track") }; let start = CMTime(value: (clip["sourceInUs"] as! NSNumber).int64Value, timescale: 1_000_000); let end = CMTime(value: (clip["sourceOutUs"] as! NSNumber).int64Value, timescale: 1_000_000); let range = CMTimeRange(start: start, end: end); try videoTrack.insertTimeRange(range, of: sourceVideo, at: cursor); if let sourceAudio = try await asset.loadTracks(withMediaType: .audio).first { try audioTrack?.insertTimeRange(range, of: sourceAudio, at: cursor) }; cursor = CMTimeAdd(cursor, range.duration) }
-    let output = try resolve(spec["outputUri"] as! String); try fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true); try? fm.removeItem(at: output); guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPreset1280x720) else { throw hostError("MEDIA_CODEC_UNSUPPORTED", "No compatible AVAssetExportSession") }; session.outputURL = output; session.outputFileType = .mp4; session.shouldOptimizeForNetworkUse = true; let jobId = spec["jobId"] as! String; exports[jobId] = session; await session.export(); exports.removeValue(forKey: jobId); if let error = session.error { throw error }; return try json(["outputUri": spec["outputUri"]!, "durationUs": Int64(CMTimeGetSeconds(composition.duration) * 1_000_000), "warnings": ["Caption burn-in, speed, ducking and overlays are not implemented"]])
+    // Output geometry comes from the portable layer, which derives it from the timeline and the
+    // render mode. This used to be a fixed AVAssetExportPreset1280x720, which silently reframed
+    // every portrait project and capped final export at 720p.
+    let renderWidth = CGFloat((spec["outputWidth"] as! NSNumber).doubleValue)
+    let renderHeight = CGFloat((spec["outputHeight"] as! NSNumber).doubleValue)
+    let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+    for clip in clips {
+      guard let assetId = clip["assetId"] as? String, let uri = uriById[assetId] else { continue }
+      let asset = AVURLAsset(url: try resolve(uri))
+      guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw hostError("MEDIA_CODEC_UNSUPPORTED", "Missing video track") }
+      let start = CMTime(value: (clip["sourceInUs"] as! NSNumber).int64Value, timescale: 1_000_000)
+      let end = CMTime(value: (clip["sourceOutUs"] as! NSNumber).int64Value, timescale: 1_000_000)
+      let range = CMTimeRange(start: start, end: end)
+      try videoTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
+      if let sourceAudio = try await asset.loadTracks(withMediaType: .audio).first { try audioTrack?.insertTimeRange(range, of: sourceAudio, at: cursor) }
+      // Fit the oriented source inside the render size without cropping.
+      let preferred = try await sourceVideo.load(.preferredTransform)
+      let oriented = (try await sourceVideo.load(.naturalSize)).applying(preferred)
+      let sourceSize = CGSize(width: abs(oriented.width), height: abs(oriented.height))
+      let scale = sourceSize.width > 0 && sourceSize.height > 0 ? min(renderWidth / sourceSize.width, renderHeight / sourceSize.height) : 1
+      let offsetX = (renderWidth - sourceSize.width * scale) / 2
+      let offsetY = (renderHeight - sourceSize.height * scale) / 2
+      layerInstruction.setTransform(preferred.concatenating(CGAffineTransform(scaleX: scale, y: scale)).concatenating(CGAffineTransform(translationX: offsetX, y: offsetY)), at: cursor)
+      cursor = CMTimeAdd(cursor, range.duration)
+    }
+    let frameRate = timeline["frameRate"] as? [String: Any]
+    let frameNumerator = (frameRate?["numerator"] as? NSNumber)?.int32Value ?? 30
+    let frameDenominator = (frameRate?["denominator"] as? NSNumber)?.int64Value ?? 1
+    let videoComposition = AVMutableVideoComposition()
+    videoComposition.renderSize = CGSize(width: renderWidth, height: renderHeight)
+    videoComposition.frameDuration = CMTime(value: frameDenominator, timescale: max(1, frameNumerator))
+    let instruction = AVMutableVideoCompositionInstruction()
+    instruction.timeRange = CMTimeRange(start: .zero, duration: cursor)
+    instruction.layerInstructions = [layerInstruction]
+    videoComposition.instructions = [instruction]
+    let output = try resolve(spec["outputUri"] as! String); try fm.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true); try? fm.removeItem(at: output)
+    guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else { throw hostError("MEDIA_CODEC_UNSUPPORTED", "No compatible AVAssetExportSession") }
+    session.outputURL = output; session.outputFileType = .mp4; session.shouldOptimizeForNetworkUse = true; session.videoComposition = videoComposition
+    let jobId = spec["jobId"] as! String; exports[jobId] = session; await session.export(); exports.removeValue(forKey: jobId); if let error = session.error { throw error }
+    return try json(["outputUri": spec["outputUri"]!, "durationUs": Int64(CMTimeGetSeconds(composition.duration) * 1_000_000), "warnings": []])
   }
   public func cancelRender(_ id: String) { exports[id]?.cancelExport() }
 
-  public func httpJSON(_ requestJSON: String) async throws -> String { let value = try JSONSerialization.jsonObject(with: Data(requestJSON.utf8)) as! [String: Any]; guard let target = value["url"] as? String, let url = URL(string: target) else { throw hostError("INVALID_INPUT", "Invalid HTTP URL") }; var request = URLRequest(url: url); request.httpMethod = value["method"] as? String ?? "GET"; request.httpBody = (value["body"] as? String)?.data(using: .utf8); (value["headers"] as? [String: String])?.forEach { request.setValue($1, forHTTPHeaderField: $0) }; request.timeoutInterval = ((value["timeoutMs"] as? NSNumber)?.doubleValue ?? 120_000) / 1000; let (data, response) = try await URLSession.shared.data(for: request); guard let http = response as? HTTPURLResponse else { throw hostError("NETWORK_UNAVAILABLE", "Missing HTTP response") }; return try json(["status": http.statusCode, "headers": http.allHeaderFields.reduce(into: [String: String]()) { if let key = $1.key as? String { $0[key.lowercased()] = String(describing: $1.value) } }, "body": [UInt8](data)]) }
+  public func httpJSON(_ requestJSON: String) async throws -> String { let value = try JSONSerialization.jsonObject(with: Data(requestJSON.utf8)) as! [String: Any]; guard let target = value["url"] as? String, let url = URL(string: target) else { throw hostError("INVALID_INPUT", "Invalid HTTP URL") }; var request = URLRequest(url: url); request.httpMethod = value["method"] as? String ?? "GET"; request.httpBody = (value["bodyBase64"] as? String).flatMap { Data(base64Encoded: $0) }; (value["headers"] as? [String: String])?.forEach { request.setValue($1, forHTTPHeaderField: $0) }; request.timeoutInterval = ((value["timeoutMs"] as? NSNumber)?.doubleValue ?? 120_000) / 1000; let (data, response) = try await URLSession.shared.data(for: request); guard let http = response as? HTTPURLResponse else { throw hostError("NETWORK_UNAVAILABLE", "Missing HTTP response") }; return try json(["status": http.statusCode, "headers": http.allHeaderFields.reduce(into: [String: String]()) { if let key = $1.key as? String { $0[key.lowercased()] = String(describing: $1.value) } }, "bodyBase64": data.base64EncodedString()]) }
   public func scheduleBackgroundJSON(_ taskJSON: String) throws { var pending = UserDefaults.standard.stringArray(forKey: "video-agent.pending-jobs") ?? []; let task = try JSONSerialization.jsonObject(with: Data(taskJSON.utf8)) as! [String: Any]; guard let id = task["id"] as? String else { throw hostError("INVALID_INPUT", "Background task id required") }; if !pending.contains(id) { pending.append(id); UserDefaults.standard.set(pending, forKey: "video-agent.pending-jobs") }; let request = BGProcessingTaskRequest(identifier: "com.videoagent.mobile.processing"); request.requiresNetworkConnectivity = task["requiresNetwork"] as? Bool ?? false; request.requiresExternalPower = task["requiresExternalPower"] as? Bool ?? false; try? BGTaskScheduler.shared.submit(request) }
   public func cancelBackground(_ id: String) { var pending = UserDefaults.standard.stringArray(forKey: "video-agent.pending-jobs") ?? []; pending.removeAll { $0 == id }; UserDefaults.standard.set(pending, forKey: "video-agent.pending-jobs") }
   public func pendingBackgroundJSON() throws -> String { try json((UserDefaults.standard.stringArray(forKey: "video-agent.pending-jobs") ?? []).map { ["id": $0, "kind": "durable-mobile-job"] }) }

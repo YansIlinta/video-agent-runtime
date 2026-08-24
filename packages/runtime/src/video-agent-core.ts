@@ -24,7 +24,7 @@ export interface RuntimeProviders {
   visual?: VisualEvidenceProvider;
   voice?: VoiceProvider;
   mediaProbe?: { probe(uri: string, context?: OperationContext): Promise<import("../../core/src/schemas.js").Asset["metadata"]> };
-  previewSelfCheck?: (outputPath: string, timeline: import("../../core/src/schemas.js").Timeline) => Promise<{ passed: boolean; warnings: string[] }>;
+  previewSelfCheck?: (outputPath: string, timeline: import("../../core/src/schemas.js").Timeline, renderedDurationUs?: number) => Promise<{ passed: boolean; warnings: string[] }>;
 }
 
 export interface RuntimeLimits { maxUploadBytes: number; maxInputDurationUs?: number; maxPreviewDurationUs?: number; maxDiskBytesPerProject?: number; maxRetainedPreviews?: number; maxConcurrentJobs?: number; maxFfmpegProcesses?: number; maxAsrJobs?: number; maxGpuJobs?: number; jobMaxAttempts?: number; baseRetryMs?: number }
@@ -370,7 +370,7 @@ export class VideoAgentCore {
     });
     const check = this.providers.renderer.id === "fake-renderer"
       ? { passed: true, warnings: result.warnings }
-      : this.providers.previewSelfCheck ? await this.providers.previewSelfCheck(result.outputPath, await this.store.readTimeline(projectId)) : { passed: result.warnings.length === 0, warnings: result.warnings };
+      : this.providers.previewSelfCheck ? await this.providers.previewSelfCheck(result.outputPath, await this.store.readTimeline(projectId), result.durationUs) : { passed: result.warnings.length === 0, warnings: result.warnings };
     if (this.limits.maxRetainedPreviews) await this.store.prunePreviews(projectId, this.limits.maxRetainedPreviews);
     await this.workflow.move(projectId, "WAITING_REVIEW", { preview: result.outputPath, selfCheck: check });
     this.logger.info("preview rendered", { projectId, operation: "preview_render", provider: this.providers.renderer.id, status: check.passed ? "succeeded" : "warning", durationMs: Math.round(result.durationUs / 1000) });

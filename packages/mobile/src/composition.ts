@@ -9,13 +9,20 @@ import type { NativeVideoHostBridge } from "./native-bridge.js";
 import { MobileProjectRepository } from "./project-repository.js";
 import { MobileProviderSettings } from "./provider-settings.js";
 import { NativeMobileRenderer } from "./renderer.js";
+import { createMobilePreviewSelfCheck } from "./self-check.js";
 import { buildMobileContextPack } from "./privacy.js";
 import { AuditedMobileHttpAdapter } from "./network-audit.js";
 
-class FixtureASRProvider implements ASRProvider {
-  readonly id = "mobile-transcript-fixture"; readonly model = "talking-head-zh-v1";
-  capabilities() { return { wordTimestamps: true, segmentTimestamps: true, speakerDiarization: false, languageDetection: false, streaming: false, confidence: true, forcedAlignment: false }; }
-  async transcribe(_uri: string, options?: { prompt?: string }): Promise<ASRResult> { const text = options?.prompt?.trim() || "真正重要的不是模型有多大，而是工作流能不能稳定地把想法变成结果。很多团队反复解释同一件事，却没有先保留最有信息量的一句。把开头收紧，删掉重复和停顿，观众会更快理解重点。"; const chunks = text.match(/[^。！？]+[。！？]?/gu) ?? [text]; let cursor = 0; return { language: "zh", languageConfidence: 1, warnings: ["Deterministic transcript fixture; local ASR is the next milestone"], segments: chunks.map((chunk) => { const tokens = chunk.match(/[\p{Script=Han}]|[^\s\p{Script=Han}]+/gu) ?? [chunk]; const start = cursor; const words = tokens.map((token, index) => ({ text: token, startSeconds: start + index * 0.32, endSeconds: start + index * 0.32 + 0.28, confidence: 0.99, speaker: "speaker-1" })); cursor = words.at(-1)?.endSeconds ?? cursor + 1; return { text: chunk, startSeconds: start, endSeconds: cursor, confidence: 0.99, speaker: "speaker-1", language: "zh", words }; }) }; }
+/**
+ * There is no on-device transcription yet. The previous fixture ignored the audio and returned a
+ * fixed paragraph, so every downstream strategy, plan and cut was computed against invented
+ * content while appearing to work. Failing loudly is the honest behaviour until a real provider
+ * is wired; see docs/mobile/local-models.md for the milestone.
+ */
+class UnavailableASRProvider implements ASRProvider {
+  readonly id = "mobile-asr-unavailable"; readonly model = "not-integrated";
+  capabilities() { return { wordTimestamps: false, segmentTimestamps: false, speakerDiarization: false, languageDetection: false, streaming: false, confidence: false, forcedAlignment: false }; }
+  async transcribe(): Promise<ASRResult> { throw new Error("On-device transcription is not implemented on this host. Configure an ASR provider before proposing an edit."); }
 }
 
 class UnavailableTTS implements TTSProvider {
@@ -64,5 +71,22 @@ export class VideoAgentFacade {
 }
 
 export async function createMobileHost(native: NativeVideoHostBridge): Promise<MobileHostComposition> {
-  const { profile } = await createNativeHostProfile(native); const repository = new MobileProjectRepository(profile.filesystem, native, profile.primitives.clock, profile.primitives.ids, profile.primitives.crypto); const providerSettings = new MobileProviderSettings(profile.filesystem, profile.secureStorage); const planner = new MutablePlanner(); const platform = await native.platform(); const renderer = new NativeMobileRenderer(native, platform); const core = new VideoAgentCore(repository, { asr: new FixtureASRProvider(), tts: new UnavailableTTS(), planner, renderer, mediaProbe: { probe: (uri) => native.probe(uri as never) } }, { maxUploadBytes: 5 * 1024 * 1024 * 1024, maxPreviewDurationUs: profile.capabilities.resourceBudget.previewMaxDurationUs, maxConcurrentJobs: 1, maxFfmpegProcesses: 1 }, new StructuredLogger("error"), profile.primitives, profile.background); const auditedHttp = new AuditedMobileHttpAdapter(profile.http); await core.jobs.recover(); return { core, facade: new VideoAgentFacade(core, native, planner, providerSettings, auditedHttp, profile.primitives), repository, providerSettings, profile };
+  const { profile } = await createNativeHostProfile(native);
+  const budget = profile.capabilities.resourceBudget;
+  const repository = new MobileProjectRepository(profile.filesystem, native, profile.primitives.clock, profile.primitives.ids, profile.primitives.crypto);
+  const providerSettings = new MobileProviderSettings(profile.filesystem, profile.secureStorage);
+  const planner = new MutablePlanner();
+  const platform = await native.platform();
+  const renderer = new NativeMobileRenderer(native, { platform, previewMaxWidth: budget.previewMaxWidth, createId: () => profile.primitives.ids.create() });
+  const core = new VideoAgentCore(
+    repository,
+    { asr: new UnavailableASRProvider(), tts: new UnavailableTTS(), planner, renderer, mediaProbe: { probe: (uri) => native.probe(uri as never) }, previewSelfCheck: createMobilePreviewSelfCheck(native) },
+    // A phone is not a workstation: cap the import at the device's own working-set budget rather
+    // than at the Node host's 5 GB.
+    { maxUploadBytes: Math.max(256 * 1024 * 1024, budget.maxWorkingSetBytes * 4), maxPreviewDurationUs: budget.previewMaxDurationUs, maxConcurrentJobs: 1, maxFfmpegProcesses: 1 },
+    new StructuredLogger("error"), profile.primitives, profile.background,
+  );
+  const auditedHttp = new AuditedMobileHttpAdapter(profile.http);
+  await core.jobs.recover();
+  return { core, facade: new VideoAgentFacade(core, native, planner, providerSettings, auditedHttp, profile.primitives), repository, providerSettings, profile };
 }
