@@ -13,6 +13,7 @@ import type { AlignmentProvider, ASRProvider, DiarizationProvider, LLMProvider, 
 import { DurableJobQueue } from "../../jobs/src/index.js";
 import { StructuredLogger } from "./logger.js";
 import { analyzeVoiceReference, asrCacheKey, assertVoiceAuthorized, fitSpeechToRange, fitTtsToRange, fuseTranscript, normalizeAsrResult, synthesizeSpeech } from "./portable-services.js";
+import { selectVoiceReference } from "./voice-reference-selection.js";
 
 export interface RuntimeProviders {
   asr: ASRProvider;
@@ -84,18 +85,39 @@ export class VideoAgentCore {
 
   analyzeVoiceReference(projectId: string, assetId: string, speakerId?: string) { return analyzeVoiceReference(this.primitives, this.store, projectId, assetId, speakerId); }
 
-  async enrollVoice(projectId: string, input: { assetId: string; name: string; languages: string[]; authorizationConfirmed: boolean; grantedBy: string; evidence: string; scope?: string; speakerId?: string; providerAuthorizationId?: string }, context?: OperationContext) {
+  async enrollVoice(projectId: string, input: { assetId: string; name: string; languages: string[]; authorizationConfirmed: boolean; grantedBy: string; evidence: string; scope?: string; speakerId?: string; providerAuthorizationId?: string; allowEmbeddingOnly?: boolean }, context?: OperationContext) {
     if (!input.authorizationConfirmed || !input.evidence.trim()) throw new Error("Unauthorized voice enrollment rejected: explicit confirmation and evidence are required");
     const provider = this.voiceProvider(); const capabilities = provider.voiceCapabilities();
     if (!capabilities.zeroShotClone || !provider.enrollVoice) throw new Error(`Provider ${provider.id} does not support authorized voice cloning`);
     const [project, quality] = await Promise.all([this.store.readProject(projectId), this.analyzeVoiceReference(projectId, input.assetId, input.speakerId)]);
     const asset = project.assets.find((item) => item.id === input.assetId); if (!asset) throw new Error(`Unknown asset ${input.assetId}`);
     if (quality.speechDurationUs < 3_000_000 || quality.usableSpeechPercentage < 20) throw new Error("Voice reference quality is insufficient for enrollment");
+
+    const referencePolicy = provider.cloneReferencePolicy?.();
+    let reference;
+    if (referencePolicy && project.activeTranscriptId) {
+      const transcript = await this.store.readTranscript(projectId, project.activeTranscriptId);
+      if (transcript.assetId === asset.id) reference = selectVoiceReference(transcript, quality, input.speakerId, referencePolicy);
+    }
+    if (referencePolicy?.highQualityRequiresReferenceText && !reference && !input.allowEmbeddingOnly) throw new Error("High-quality voice enrollment requires a clean transcript-backed reference range; transcribe/align the source first or explicitly opt into embedding-only cloning");
+    if (input.allowEmbeddingOnly && referencePolicy && !referencePolicy.embeddingOnlySupported) throw new Error(`Provider ${provider.id} does not support embedding-only voice enrollment`);
+
     const now = this.now();
-    const result = await this.voiceCall(projectId, "voice-enroll", () => provider.enrollVoice!({ name: input.name, referencePath: this.store.resolveProjectFile(projectId, asset.relativePath), referenceAssetId: asset.id, languages: input.languages, ...(input.providerAuthorizationId ? { providerAuthorizationId: input.providerAuthorizationId } : {}), authorization: { grantedBy: input.grantedBy, grantedAt: now, evidence: input.evidence, scope: input.scope ?? "project" } }, context), { inputDurationUs: quality.speechDurationUs });
-    const profile: VoiceProfile = { id: this.id(), type: "cloned", provider: provider.id, providerVoiceId: result.providerVoiceId, model: result.model, name: input.name, languages: input.languages, cloning: true, status: "preview", referenceAssetIds: [asset.id], authorizationStatus: "authorized", createdAt: now, consent: { grantedBy: input.grantedBy, grantedAt: now, evidence: input.evidence, scope: input.scope ?? "project" }, usageRestrictions: ["Use only within recorded authorization scope", "Generated speech must be disclosed as synthetic"], providerMetadata: result.providerMetadata ?? {} };
+    const enrollmentDurationUs = reference ? reference.endUs - reference.startUs : quality.speechDurationUs;
+    const result = await this.voiceCall(projectId, "voice-enroll", () => provider.enrollVoice!({
+      name: input.name,
+      referencePath: this.store.resolveProjectFile(projectId, asset.relativePath),
+      referenceAssetId: asset.id,
+      languages: input.languages,
+      ...(reference ? { referenceText: reference.referenceText, referenceRangeSeconds: { start: reference.startUs / 1_000_000, end: reference.endUs / 1_000_000 } } : {}),
+      ...(input.allowEmbeddingOnly ? { allowEmbeddingOnly: true } : {}),
+      ...(input.providerAuthorizationId ? { providerAuthorizationId: input.providerAuthorizationId } : {}),
+      authorization: { grantedBy: input.grantedBy, grantedAt: now, evidence: input.evidence, scope: input.scope ?? "project" },
+    }, context), { inputDurationUs: enrollmentDurationUs });
+    const referenceProvenance = reference ? { mode: "transcript-backed", startUs: reference.startUs, endUs: reference.endUs, segmentIds: reference.segmentIds, ...(reference.speakerId ? { speakerId: reference.speakerId } : {}), score: reference.score } : { mode: input.allowEmbeddingOnly ? "embedding-only-explicit" : "provider-managed" };
+    const profile: VoiceProfile = { id: this.id(), type: "cloned", provider: provider.id, providerVoiceId: result.providerVoiceId, model: result.model, name: input.name, languages: input.languages, cloning: true, status: "preview", referenceAssetIds: [asset.id], authorizationStatus: "authorized", createdAt: now, consent: { grantedBy: input.grantedBy, grantedAt: now, evidence: input.evidence, scope: input.scope ?? "project" }, usageRestrictions: ["Use only within recorded authorization scope", "Generated speech must be disclosed as synthetic"], providerMetadata: { ...(result.providerMetadata ?? {}), reference: referenceProvenance } };
     if (result.derivedRepresentation) await this.store.writeProjectFile(projectId, `voices/derived/${profile.id}.bin`, result.derivedRepresentation, true);
-    await this.store.writeVoiceProfile(projectId, profile); return { profile: publicVoiceProfile(profile), quality, requiresApproval: true };
+    await this.store.writeVoiceProfile(projectId, profile); return { profile: publicVoiceProfile(profile), quality, reference: referenceProvenance, requiresApproval: true };
   }
 
   async approveVoice(projectId: string, voiceProfileId: string) { const profile = await this.store.readVoiceProfile(projectId, voiceProfileId); if (profile.status !== "preview") throw new Error("VoiceProfile is not awaiting preview approval"); assertVoiceAuthorized({ ...profile, status: "active" }); const active = { ...profile, status: "active" as const }; await this.store.writeVoiceProfile(projectId, active); return publicVoiceProfile(active); }
