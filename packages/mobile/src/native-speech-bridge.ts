@@ -2,12 +2,7 @@ import type { LogicalUri } from "../../platform/src/contracts.js";
 
 export type MobileOpenAIASRModel = "gpt-4o-transcribe-diarize" | "whisper-1";
 
-/**
- * Narrow native boundary for large speech uploads. It intentionally does not accept an arbitrary
- * URL: exposing a generic "upload local file" primitive would let a misconfigured provider send
- * private project media to any host. Native implementations pin the request to OpenAI's official
- * transcription endpoint and stream the file without moving media bytes through React Native JS.
- */
+/** Narrow native speech boundary: endpoints are pinned in native code; callers cannot upload project media to arbitrary URLs. */
 export interface NativeOpenAITranscriptionRequest {
   requestId: string;
   uri: LogicalUri;
@@ -18,7 +13,27 @@ export interface NativeOpenAITranscriptionRequest {
   timeoutMs?: number;
 }
 
+export interface NativeOpenAITTSRequest {
+  requestId: string;
+  outputUri: LogicalUri;
+  apiKey: string;
+  model: string;
+  text: string;
+  voiceId: string;
+  speed?: number;
+  timeoutMs?: number;
+}
+
+export interface NativeOpenAITTSResult {
+  durationSeconds: number;
+  sampleRate: number;
+  model: string;
+  voiceId: string;
+}
+
 export interface NativeSpeechHostBridge {
   transcribeOpenAI(request: NativeOpenAITranscriptionRequest): Promise<string>;
+  synthesizeOpenAI(request: NativeOpenAITTSRequest): Promise<NativeOpenAITTSResult>;
   cancelTranscription(requestId: string): Promise<void>;
+  cancelSynthesis(requestId: string): Promise<void>;
 }
