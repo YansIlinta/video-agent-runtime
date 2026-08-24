@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { createRuntime } from "../packages/runtime/src/factory.js";
@@ -125,9 +124,9 @@ let transcriptSpeakerIds: string[] = [];
 
 async function ensureImported() {
   if (projectId && sourceAssetId) return;
-  const project = await core.createProject(`real-speech-acceptance-${stamp}`);
-  projectId = project.id;
-  const asset = await core.importVideo(project.id, fixturePath);
+  const created = await core.createProject(`real-speech-acceptance-${stamp}`);
+  projectId = created.project.id;
+  const asset = await core.importVideo(created.project.id, fixturePath);
   sourceAssetId = asset.id;
   inputDurationUs = asset.metadata.durationUs;
 }
