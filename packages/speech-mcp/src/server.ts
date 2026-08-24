@@ -205,7 +205,7 @@ register("speech_translate", "Translate an ASR run segment-by-segment with a sel
   return { runId, providerKind, transport, model, reasoning, translation };
 });
 
-register("speech_synthesize", "Synthesize the translated segments into a dubbed WAV track using the selected TTS model and voice.", z.object({
+register("speech_synthesize", "Synthesize the translated segments into a source-timed dubbed WAV track using the selected TTS model and voice.", z.object({
   runId: z.string().min(1),
   provider: ttsProviderSchema.default("kokoro"),
   model: z.string().optional(),
@@ -223,7 +223,7 @@ register("speech_synthesize", "Synthesize the translated segments into a dubbed 
   });
 });
 
-register("video_translate", "End-to-end language replacement proof: video/audio -> ASR -> LLM translation -> TTS -> new video with the translated audio track. This is narration-style dubbing, not lip-sync editing.", z.object({
+register("video_translate", "End-to-end language replacement proof: video/audio -> ASR -> LLM translation -> TTS -> new video with source-timed translated audio. This is single-track dubbing, not lip-sync editing.", z.object({
   sourcePath: z.string().min(1),
   targetLanguage: z.string().min(1),
   asrProvider: asrProviderSchema.default("faster-whisper"),
@@ -263,7 +263,8 @@ register("video_translate", "End-to-end language replacement proof: video/audio 
     segmentCount: dubbed.segments.length,
     warnings: [
       ...result.warnings,
-      "Translated audio is narration-style sequential dubbing; timing/lip-sync editing is intentionally deferred.",
+      ...(dubbed.timingWarnings ?? []),
+      "Translated audio preserves source speech slots and pauses, but remains single-track dubbing rather than phoneme/lip synchronization.",
     ],
   };
 });

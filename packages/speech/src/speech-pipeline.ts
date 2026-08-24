@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -34,6 +34,15 @@ export interface TranslateOptions {
   signal?: AbortSignal;
 }
 
+export interface SpeechSegmentTimingPlan {
+  gapBeforeSeconds: number;
+  targetDurationSeconds: number;
+  playbackRate: number;
+  renderedStartSeconds: number;
+  renderedEndSeconds: number;
+  delayedBySeconds: number;
+}
+
 export interface SynthesizedSpeechSegment {
   index: number;
   sourceStartSeconds: number;
@@ -42,6 +51,12 @@ export interface SynthesizedSpeechSegment {
   targetText: string;
   audioPath: string;
   generatedDurationSeconds: number;
+  targetDurationSeconds?: number;
+  gapBeforeSeconds?: number;
+  playbackRate?: number;
+  renderedStartSeconds?: number;
+  renderedEndSeconds?: number;
+  delayedBySeconds?: number;
 }
 
 export interface SpeechSynthesisManifest {
@@ -51,6 +66,7 @@ export interface SpeechSynthesisManifest {
   voiceId: string;
   segments: SynthesizedSpeechSegment[];
   dubbedAudioPath: string;
+  timingWarnings?: string[];
 }
 
 export interface VideoDubResult extends SpeechSynthesisManifest {
@@ -122,6 +138,81 @@ function concatEscape(filePath: string) {
   return filePath.replace(/'/gu, "'\\''");
 }
 
+export function planSpeechSegmentTiming(
+  sourceStartSeconds: number,
+  sourceEndSeconds: number,
+  generatedDurationSeconds: number,
+  renderedCursorSeconds: number,
+): SpeechSegmentTimingPlan {
+  for (const [name, value] of Object.entries({ sourceStartSeconds, sourceEndSeconds, generatedDurationSeconds, renderedCursorSeconds })) {
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a finite non-negative number`);
+  }
+  if (sourceEndSeconds <= sourceStartSeconds) throw new Error("Speech segment end must be after its start");
+  if (generatedDurationSeconds <= 0) throw new Error("Generated speech duration must be positive");
+
+  const targetDurationSeconds = sourceEndSeconds - sourceStartSeconds;
+  const renderedStartSeconds = Math.max(renderedCursorSeconds, sourceStartSeconds);
+  const gapBeforeSeconds = Math.max(0, renderedStartSeconds - renderedCursorSeconds);
+  const delayedBySeconds = Math.max(0, renderedStartSeconds - sourceStartSeconds);
+  const playbackRate = generatedDurationSeconds > targetDurationSeconds
+    ? generatedDurationSeconds / targetDurationSeconds
+    : 1;
+
+  return {
+    gapBeforeSeconds,
+    targetDurationSeconds,
+    playbackRate,
+    renderedStartSeconds,
+    renderedEndSeconds: renderedStartSeconds + targetDurationSeconds,
+    delayedBySeconds,
+  };
+}
+
+function atempoChain(playbackRate: number): string[] {
+  if (playbackRate <= 1.000001) return [];
+  const filters: string[] = [];
+  let remaining = playbackRate;
+  while (remaining > 2) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  if (remaining > 1.000001) filters.push(`atempo=${remaining.toFixed(6)}`);
+  return filters;
+}
+
+function ffmpegSeconds(value: number) {
+  return Math.max(0, value).toFixed(6);
+}
+
+async function fitSegmentToSourceTiming(
+  ffmpeg: string,
+  inputPath: string,
+  outputPath: string,
+  timing: SpeechSegmentTimingPlan,
+  signal?: AbortSignal,
+) {
+  const filters = [
+    ...atempoChain(timing.playbackRate),
+    `apad=pad_dur=${ffmpegSeconds(timing.targetDurationSeconds)}`,
+    `atrim=duration=${ffmpegSeconds(timing.targetDurationSeconds)}`,
+  ];
+  if (timing.gapBeforeSeconds > 0.0005) {
+    filters.push(`adelay=delays=${Math.round(timing.gapBeforeSeconds * 1000)}:all=1`);
+  }
+  const chunkDurationSeconds = timing.gapBeforeSeconds + timing.targetDurationSeconds;
+  filters.push(
+    `apad=pad_dur=${ffmpegSeconds(chunkDurationSeconds)}`,
+    `atrim=duration=${ffmpegSeconds(chunkDurationSeconds)}`,
+  );
+
+  const fitted = await runProcess(ffmpeg, [
+    "-y", "-i", inputPath,
+    "-af", filters.join(","),
+    "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", outputPath,
+  ], { timeoutMs: 10 * 60_000, maxOutputBytes: 2 * 1024 * 1024, ...(signal ? { signal } : {}) });
+  if (fitted.exitCode !== 0) throw new Error(`Failed to fit translated speech to source timing: ${fitted.stderr.slice(-4000)}`);
+}
+
 export async function synthesizeTranslation(
   source: ASRResult,
   translation: SpeechTranslation,
@@ -140,6 +231,9 @@ export async function synthesizeTranslation(
   }
   await mkdir(options.outputDirectory, { recursive: true });
   const generated: SynthesizedSpeechSegment[] = [];
+  const timingWarnings: string[] = [];
+  const ffmpeg = options.ffmpeg ?? process.env.FFMPEG_PATH ?? "ffmpeg";
+  let renderedCursorSeconds = 0;
 
   for (let index = 0; index < translation.segments.length; index += 1) {
     if (options.signal?.aborted) throw options.signal.reason ?? new Error("Cancelled");
@@ -147,10 +241,11 @@ export async function synthesizeTranslation(
     const sourceSegment = source.segments[translated.index];
     if (!sourceSegment) throw new Error(`Missing source segment ${translated.index}`);
     options.onProgress?.(
-      0.05 + (0.75 * index) / Math.max(1, translation.segments.length),
+      0.05 + (0.72 * index) / Math.max(1, translation.segments.length),
       "tts",
       `Synthesizing segment ${index + 1}/${translation.segments.length}`,
     );
+    const generatedAudioPath = path.join(options.outputDirectory, `generated-${String(index).padStart(4, "0")}.wav`);
     const audioPath = path.join(options.outputDirectory, `segment-${String(index).padStart(4, "0")}.wav`);
     const ttsInput = {
       text: translated.targetText,
@@ -161,13 +256,36 @@ export async function synthesizeTranslation(
     const context = { ...(options.signal ? { signal: options.signal } : {}) };
     let generatedDurationSeconds: number;
     if (tts.synthesizeToFile) {
-      const result = await tts.synthesizeToFile({ ...ttsInput, outputUri: audioPath }, context);
+      const result = await tts.synthesizeToFile({ ...ttsInput, outputUri: generatedAudioPath }, context);
       generatedDurationSeconds = result.durationSeconds;
     } else {
       const result = await tts.synthesize(ttsInput, context);
-      await writeFile(audioPath, result.audio, { flag: "wx" });
+      await writeFile(generatedAudioPath, result.audio, { flag: "wx" });
       generatedDurationSeconds = result.durationSeconds;
     }
+
+    const timing = planSpeechSegmentTiming(
+      sourceSegment.startSeconds,
+      sourceSegment.endSeconds,
+      generatedDurationSeconds,
+      renderedCursorSeconds,
+    );
+    if (timing.playbackRate > 1.35) {
+      timingWarnings.push(`Segment ${translated.index} required ${timing.playbackRate.toFixed(2)}x speech compression to fit its source slot.`);
+    }
+    if (timing.delayedBySeconds > 0.05) {
+      timingWarnings.push(`Segment ${translated.index} overlaps earlier speech and was delayed by ${timing.delayedBySeconds.toFixed(3)}s in the single-track dub.`);
+    }
+
+    options.onProgress?.(
+      0.77 + (0.13 * index) / Math.max(1, translation.segments.length),
+      "tts-fit",
+      `Aligning segment ${index + 1}/${translation.segments.length} to source timing`,
+    );
+    await fitSegmentToSourceTiming(ffmpeg, generatedAudioPath, audioPath, timing, options.signal);
+    await unlink(generatedAudioPath).catch(() => undefined);
+    renderedCursorSeconds = timing.renderedEndSeconds;
+
     generated.push({
       index: translated.index,
       sourceStartSeconds: sourceSegment.startSeconds,
@@ -176,10 +294,15 @@ export async function synthesizeTranslation(
       targetText: translated.targetText,
       audioPath,
       generatedDurationSeconds,
+      targetDurationSeconds: timing.targetDurationSeconds,
+      gapBeforeSeconds: timing.gapBeforeSeconds,
+      playbackRate: timing.playbackRate,
+      renderedStartSeconds: timing.renderedStartSeconds,
+      renderedEndSeconds: timing.renderedEndSeconds,
+      delayedBySeconds: timing.delayedBySeconds,
     });
   }
 
-  const ffmpeg = options.ffmpeg ?? process.env.FFMPEG_PATH ?? "ffmpeg";
   const listPath = path.join(options.outputDirectory, "concat.txt");
   await writeFile(listPath, generated.map((segment) => `file '${concatEscape(path.resolve(segment.audioPath))}'`).join("\n") + "\n", "utf8");
   const dubbedAudioPath = path.join(options.outputDirectory, "dubbed.wav");
@@ -188,7 +311,7 @@ export async function synthesizeTranslation(
     "-ac", "2", "-ar", "48000", dubbedAudioPath,
   ], { timeoutMs: 30 * 60_000, maxOutputBytes: 2 * 1024 * 1024, ...(options.signal ? { signal: options.signal } : {}) });
   if (concat.exitCode !== 0) throw new Error(`Failed to concatenate synthesized speech: ${concat.stderr.slice(-4000)}`);
-  options.onProgress?.(0.9, "tts-concat", "Built translated speech track");
+  options.onProgress?.(0.95, "tts-concat", "Built source-timed translated speech track");
 
   return {
     targetLanguage: translation.targetLanguage,
@@ -197,6 +320,7 @@ export async function synthesizeTranslation(
     voiceId: options.voiceId,
     segments: generated,
     dubbedAudioPath,
+    timingWarnings,
   };
 }
 
