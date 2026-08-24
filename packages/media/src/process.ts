@@ -7,6 +7,7 @@ export interface ProcessResult {
 }
 
 export function runProcess(command: string, args: string[], options: { timeoutMs?: number; maxOutputBytes?: number; signal?: AbortSignal; onStderr?: (text: string) => void } = {}): Promise<ProcessResult> {
+  if (options.signal?.aborted) return Promise.reject(options.signal.reason instanceof Error ? options.signal.reason : new Error(`${command} cancelled`));
   const timeoutMs = options.timeoutMs ?? 30 * 60_000;
   const maxOutputBytes = options.maxOutputBytes ?? 10 * 1024 * 1024;
   return new Promise((resolve, reject) => {
@@ -21,8 +22,7 @@ export function runProcess(command: string, args: string[], options: { timeoutMs
       setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 2_000).unref();
     };
     const onAbort = () => { cancelled = true; terminate(); };
-    if (options.signal?.aborted) onAbort();
-    else options.signal?.addEventListener("abort", onAbort, { once: true });
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => {
       timedOut = true;
       terminate();
