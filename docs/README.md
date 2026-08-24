@@ -1,37 +1,93 @@
-# Documentation
+# Video Agent Runtime Documentation
 
-Documents are organized by topic. Version-stamped material lives in [`releases/`](releases/); everything outside it describes the system as it stands today.
+This directory contains the technical documentation for the runtime as it exists today. The repository root [README](../README.md) is the product entry point; this index is for architecture, provider behavior, validation, mobile implementation and release history.
 
-## Design
+## Start here
+
+| If you want to… | Read |
+| --- | --- |
+| Understand the product and run it | [../README.md](../README.md) |
+| Set up a development environment | [development.md](development.md) |
+| Understand product wording and claim boundaries | [product-positioning.md](product-positioning.md) |
+| Understand the core architecture | [architecture.md](architecture.md) |
+| Connect an agent through MCP | [speech-mcp.md](speech-mcp.md) and [`../mcp.example.json`](../mcp.example.json) |
+| Configure or compare speech models | [speech-models-2026.md](speech-models-2026.md) |
+| Understand VoiceProfile / cloning / design | [voice-identity.md](voice-identity.md) |
+| Run real ASR / LLM / TTS acceptance | [real-speech-acceptance.md](real-speech-acceptance.md) |
+| Understand the mobile host | [mobile/README.md](mobile/README.md) |
+| Check what has actually been measured | [benchmarks.md](benchmarks.md) |
+
+## Core runtime
 
 | Document | Contents |
 | --- | --- |
-| [architecture.md](architecture.md) | Package layout, the `source → Version → export` flow, durable project layout, planner/patch/job/render design |
-| [security.md](security.md) | Voice-reference handling, secret policy, what is filtered out of MCP and network responses |
-| [control-api.md](control-api.md) | The narrow bearer-authenticated HTTP control surface and its endpoints |
-| [voice-identity.md](voice-identity.md) | Empirical study of voice/TTS models and deployment options |
+| [product-positioning.md](product-positioning.md) | Canonical product wording, public terminology, non-goals and verification/claim levels |
+| [development.md](development.md) | Local setup, provider configuration, commands, package boundaries, performance rules and testing strategy |
+| [architecture.md](architecture.md) | Package boundaries, `source → Version → export`, ProjectStore layout, workflow, EditPlan/EditPatch, jobs, rendering and recovery |
+| [security.md](security.md) | Secret policy, path/media boundaries, filtered outputs, voice-reference handling and agent restrictions |
+| [control-api.md](control-api.md) | Narrow bearer-authenticated local HTTP control surface |
+| [upstream-study.md](upstream-study.md) | Prior art and external projects that informed the architecture |
 
-## Mobile
+The central rule across these documents is that models propose structured changes while the runtime owns project state, validation, persistence and rendering.
 
-| Document | Contents |
-| --- | --- |
-| [mobile/README.md](mobile/README.md) | Entry point for the mobile host work |
-| [mobile/architecture.md](mobile/architecture.md) | Mobile Host runtime audit: what had to become portable and why |
-| [mobile/native-host-status.md](mobile/native-host-status.md) | **Current status of the native iOS/Android host, including what is not yet proven** |
-| [mobile/known-issues.md](mobile/known-issues.md) | Open defects found by source review, ranked by severity |
-| [mobile/framework-evaluation.md](mobile/framework-evaluation.md) | Why React Native New Architecture over the alternatives |
-| [mobile/provider-auth.md](mobile/provider-auth.md) | Provider authentication on device; the BYOK decision record |
-| [mobile/local-models.md](mobile/local-models.md) | On-device ASR/TTS evaluation and the milestone order |
-| [mobile/migration.md](mobile/migration.md) | Porting an existing Node-host project to a new host |
-
-## Measurements and research
+## Speech & voice
 
 | Document | Contents |
 | --- | --- |
-| [benchmarks.md](benchmarks.md) | All measured figures, plus an explicit list of what was **not** measured |
-| [upstream-study.md](upstream-study.md) | Prior-art survey behind the runtime design |
+| [speech-models-2026.md](speech-models-2026.md) | Current ASR/TTS/voice model landscape, deployment modes and licensing notes |
+| [voice-identity.md](voice-identity.md) | VoiceProfile, authorization, reference quality, Voice Design, cloning, deletion and provenance |
+| [speech-mcp.md](speech-mcp.md) | Lightweight ASR → structured LLM → TTS MCP path and how it differs from the full editing runtime |
+| [real-speech-acceptance.md](real-speech-acceptance.md) | Opt-in real-provider/model acceptance harness, metrics and claim boundaries |
+
+### Current runtime choices
+
+The repository currently has maintained runtime paths for:
+
+- ASR: faster-whisper, Qwen3-ASR and hosted OpenAI transcription.
+- Alignment/diarization: optional WhisperX enrichment.
+- TTS: Kokoro, Qwen3-TTS and hosted OpenAI speech.
+- Voice identity: authorized Qwen3-TTS cloning/design through the shared VoiceProvider contract.
+- Structured LLM generation: schema-constrained provider contracts reused by editing and lightweight speech transforms.
+
+The model catalog contains more candidates than the runtime intentionally implements. A model being researched does not mean it is a supported provider.
+
+## Validation & measurements
+
+| Document / command | Purpose |
+| --- | --- |
+| [benchmarks.md](benchmarks.md) | Recorded measurements and explicit unmeasured quantities |
+| [real-speech-acceptance.md](real-speech-acceptance.md) | How to run real ASR / LLM / TTS / authorized clone acceptance |
+| `npm run eval:speech-real` | Produce one real-provider acceptance report |
+| `npm run benchmark:speech-summary` | Aggregate repeated real-provider reports by stage/provider/model |
+| `npm run eval` | Deterministic semantic evaluation corpus |
+| `npm run demo` | End-to-end local editing workflow with real FFmpeg rendering |
+
+Measurement rules:
+
+- A skipped check is written as skipped, never implied to have passed.
+- CI does not claim local-model quality, hosted-provider behavior, VRAM, battery or device performance when the required runtime is absent.
+- Controller RSS is not presented as child model-process memory.
+- Machine-level `nvidia-smi` sampling is not presented as process-attributed peak VRAM.
+- Invalid or blocked real-provider runs are retained as evidence instead of being removed from summaries.
+
+## Mobile host
+
+| Document | Contents |
+| --- | --- |
+| [mobile/README.md](mobile/README.md) | Mobile work entry point |
+| [mobile/architecture.md](mobile/architecture.md) | Portability audit and host/platform boundaries |
+| [mobile/native-host-status.md](mobile/native-host-status.md) | **Current native iOS/Android status and what is still unproven** |
+| [mobile/known-issues.md](mobile/known-issues.md) | Open source-review defects ranked by severity |
+| [mobile/framework-evaluation.md](mobile/framework-evaluation.md) | React Native New Architecture decision record |
+| [mobile/provider-auth.md](mobile/provider-auth.md) | On-device BYOK and credential handling |
+| [mobile/local-models.md](mobile/local-models.md) | On-device ASR/TTS research and milestone order |
+| [mobile/migration.md](mobile/migration.md) | Host portability and project migration notes |
+
+The mobile implementation must not be described as device-ready until native compilation, simulator/device media tests and the documented measurement pass exist.
 
 ## Release history
+
+Version-stamped reports live in [`releases/`](releases/). Everything else describes the current system.
 
 | Release | Report |
 | --- | --- |
@@ -40,10 +96,13 @@ Documents are organized by topic. Version-stamped material lives in [`releases/`
 | 0.2.0 | [releases/v0.2.0.md](releases/v0.2.0.md) |
 | 0.1.5 | [releases/v0.1.5.md](releases/v0.1.5.md) · [audit](releases/v0.1.5-audit.md) |
 
-A condensed summary of every release is in [../CHANGELOG.md](../CHANGELOG.md).
+A condensed release history is maintained in [../CHANGELOG.md](../CHANGELOG.md).
 
-## Conventions
+## Documentation conventions
 
-- Reports state what was verified, on what host, and what was skipped. A skipped check is written as skipped, never omitted.
-- Benchmark figures carry the environment they were measured on and a scope warning naming what they do not cover.
-- Unmeasured quantities stay unmeasured. They are not filled with estimates.
+- Root README = product home and quickest path to a working run.
+- `docs/development.md` = day-to-day setup and engineering commands.
+- `docs/` = current technical truth.
+- `docs/releases/` = version-stamped historical evidence.
+- Provider capability tables describe the adapter that actually exists, not every feature an upstream model may advertise.
+- Unsupported or unverified behavior is stated explicitly rather than hidden behind broad terms such as “mobile ready” or “fully local”.
