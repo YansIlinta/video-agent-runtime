@@ -51,8 +51,12 @@ describe("voice reference selection", () => {
     expect(selected?.referenceText).toBe("hello there this is a clean reference");
   });
 
-  it("rejects a range that crosses known speakers instead of silently cloning a mixture", () => {
-    const selected = selectVoiceReference(transcript(), quality([{ startUs: 5_000_000, endUs: 10_000_000, score: 1, reasons: ["bad mixed range"] }]), undefined);
+  it("requires explicit speaker selection when the transcript contains multiple speakers", () => {
+    expect(() => selectVoiceReference(transcript(), quality([{ startUs: 1_000_000, endUs: 8_000_000, score: 1, reasons: [] }]), undefined)).toThrow(/speakerId is required/i);
+  });
+
+  it("rejects a selected-speaker range that crosses another known speaker", () => {
+    const selected = selectVoiceReference(transcript(), quality([{ startUs: 5_000_000, endUs: 10_000_000, score: 1, reasons: ["bad mixed range"] }]), "A");
     expect(selected).toBeUndefined();
   });
 
