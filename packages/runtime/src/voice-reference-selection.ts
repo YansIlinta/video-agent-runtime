@@ -51,6 +51,8 @@ export function selectVoiceReference(
   policy: VoiceCloneReferencePolicy = { minDurationSeconds: 3, maxDurationSeconds: 15, highQualityRequiresReferenceText: true, embeddingOnlySupported: false },
 ): VoiceReferenceSelection | undefined {
   if (transcript.assetId !== quality.assetId) return undefined;
+  const transcriptSpeakers = new Set(transcript.segments.map((segment) => segment.speakerId).filter((value): value is string => Boolean(value)));
+  if (!speakerId && transcriptSpeakers.size > 1) throw new Error("Multiple speakers are present in the active transcript; speakerId is required for voice enrollment");
   if (speakerId && !transcript.segments.some((segment) => segment.speakerId === speakerId)) throw new Error(`Speaker ${speakerId} is not present in the active transcript`);
 
   const minUs = Math.max(1, policy.minDurationSeconds * 1_000_000);
