@@ -10,6 +10,7 @@ const QWEN3_TTS_LICENSE = { code: "Apache-2.0", weights: "Apache-2.0", voice: "U
 const DEFAULT_BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base";
 const DEFAULT_DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign";
 const MAX_TEXT_CHARS = 4_096;
+const CLONE_REFERENCE_POLICY = { minDurationSeconds: 3, maxDurationSeconds: 15, highQualityRequiresReferenceText: true, embeddingOnlySupported: true } as const;
 
 interface StoredVoiceManifest {
   schemaVersion: 1;
@@ -62,6 +63,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
       remoteDeletion: false,
     };
   }
+  cloneReferencePolicy() { return { ...CLONE_REFERENCE_POLICY }; }
   async listVoices(): Promise<VoiceProfile[]> { return []; }
 
   private async ensureRoot() { await mkdir(this.voiceRoot, { recursive: true }); }
@@ -77,7 +79,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
     const args = ["-hide_banner", "-loglevel", "error", "-y"];
     if (range) args.push("-ss", String(Math.max(0, range.start)));
     args.push("-i", input.referencePath);
-    if (range) args.push("-t", String(Math.max(0.1, Math.min(15, range.end - range.start)))); else args.push("-t", "15");
+    if (range) args.push("-t", String(Math.max(0.1, Math.min(CLONE_REFERENCE_POLICY.maxDurationSeconds, range.end - range.start)))); else args.push("-t", String(CLONE_REFERENCE_POLICY.maxDurationSeconds));
     args.push("-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", output);
     context?.onProgress?.(0.05, "voice-reference", "Extracting a bounded mono voice reference");
     const result = await runProcess("ffmpeg", args, { timeoutMs: 120_000, maxOutputBytes: 2 * 1024 * 1024, ...(context?.signal ? { signal: context.signal } : {}) });
@@ -87,15 +89,21 @@ export class Qwen3VoiceProvider implements VoiceProvider {
 
   async enrollVoice(input: VoiceEnrollmentInput, context?: OperationContext) {
     if (!input.authorization.evidence.trim() || !input.authorization.grantedBy.trim()) throw new Error("Qwen3 voice enrollment requires explicit authorization evidence");
+    const referenceText = input.referenceText?.trim() || undefined;
+    if (!referenceText && !input.allowEmbeddingOnly) throw new Error("Qwen3 high-quality voice cloning requires exact referenceText for the selected audio range; embedding-only mode must be explicitly opted into");
+    if (!referenceText && !CLONE_REFERENCE_POLICY.embeddingOnlySupported) throw new Error("Qwen3 embedding-only cloning is unavailable in this adapter");
+    if (input.referenceRangeSeconds) {
+      const duration = input.referenceRangeSeconds.end - input.referenceRangeSeconds.start;
+      if (!(duration >= CLONE_REFERENCE_POLICY.minDurationSeconds && duration <= CLONE_REFERENCE_POLICY.maxDurationSeconds)) throw new Error(`Qwen3 voice reference must be ${CLONE_REFERENCE_POLICY.minDurationSeconds}-${CLONE_REFERENCE_POLICY.maxDurationSeconds} seconds`);
+    }
     await this.ensureRoot();
     const voiceId = `qwen3-${randomUUID()}`; const directory = this.dir(voiceId); const referenceAudio = path.join(directory, "reference.wav");
     await mkdir(directory, { recursive: false });
     try {
       await this.extractReference(input, referenceAudio, context);
-      const referenceText = input.referenceText?.trim() || undefined;
       const manifest: StoredVoiceManifest = { schemaVersion: 1, id: voiceId, name: input.name, referenceAudio, ...(referenceText ? { referenceText } : {}), referenceAssetId: input.referenceAssetId, languages: input.languages, createdAt: new Date().toISOString(), origin: "authorized-clone", xVectorOnly: !referenceText, ...(input.referenceRangeSeconds ? { referenceRangeSeconds: input.referenceRangeSeconds } : {}) };
       await writeFile(this.manifestPath(voiceId), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
-      return { providerVoiceId: voiceId, model: this.model, providerMetadata: { local: true, cloneMode: referenceText ? "icl-reference-text" : "x-vector-only", referenceRangeSeconds: input.referenceRangeSeconds ?? { start: 0, end: 15 } } };
+      return { providerVoiceId: voiceId, model: this.model, providerMetadata: { local: true, cloneMode: referenceText ? "icl-reference-text" : "x-vector-only", referenceRangeSeconds: input.referenceRangeSeconds ?? { start: 0, end: CLONE_REFERENCE_POLICY.maxDurationSeconds } } };
     } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   }
 
