@@ -11,11 +11,12 @@ def device_config(torch):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["clone", "design"], required=True)
+    parser.add_argument("--mode", choices=["custom", "clone", "design"], required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--text", required=True)
     parser.add_argument("--language", default="Auto")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--speaker")
     parser.add_argument("--ref-audio")
     parser.add_argument("--ref-text")
     parser.add_argument("--instruct")
@@ -32,7 +33,16 @@ def main() -> int:
     try:
         device, dtype = device_config(torch)
         model = Qwen3TTSModel.from_pretrained(args.model, device_map=device, dtype=dtype)
-        if args.mode == "clone":
+        if args.mode == "custom":
+            if not args.speaker or not args.speaker.strip():
+                raise ValueError("custom mode requires --speaker")
+            wavs, sr = model.generate_custom_voice(
+                text=args.text,
+                speaker=args.speaker,
+                language=args.language or "Auto",
+                instruct=(args.instruct.strip() if args.instruct else None),
+            )
+        elif args.mode == "clone":
             if not args.ref_audio:
                 raise ValueError("clone mode requires --ref-audio")
             ref_text = args.ref_text.strip() if args.ref_text else None
