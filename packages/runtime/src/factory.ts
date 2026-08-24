@@ -3,8 +3,9 @@ import { FFmpegRenderer, selfCheckPreview } from "../../render/src/index.js";
 import { FFmpegVisualEvidenceProvider, probeMedia } from "../../media/src/index.js";
 import { createNodeHostProfile } from "../../platform/src/index.js";
 import { FakeASRProvider, FakeLLMProvider, FakeVoiceProvider, OpenAIASRProvider, OpenAILLMProvider, OpenAIVoiceProvider, type OpenAIASRModel } from "../../providers/src/index.js";
-import { FasterWhisperASRProvider, KokoroTTSProvider, Qwen3ASRProvider, Qwen3VoiceProvider, WhisperXProvider } from "../../speech/src/index.js";
+import { FasterWhisperASRProvider, FFmpegVoiceReferenceAnalyzer, KokoroTTSProvider, Qwen3ASRProvider, Qwen3VoiceProvider, WhisperXProvider } from "../../speech/src/index.js";
 import { VideoAgentCore } from "./video-agent-core.js";
+import { analyzeVoiceReference as analyzeVoiceReferencePortable } from "./portable-services.js";
 import { loadRuntimeConfig, loadRuntimeSecrets, type RuntimeConfig } from "./config.js";
 import { StructuredLogger } from "./logger.js";
 
@@ -36,5 +37,16 @@ export function createRuntime(options: { workspaceRoot?: string; asrProvider?: "
   const planner = config.providers.planner === "openai" ? new OpenAILLMProvider(config.providers.plannerModel, secrets.openaiApiKey) : new FakeLLMProvider();
   const whisperx = config.providers.alignment === "whisperx" || config.providers.diarization === "whisperx" ? new WhisperXProvider("default", config.executables.python, secrets.huggingFaceToken) : undefined;
   const host = createNodeHostProfile(config.workspaceRoot);
-  return new VideoAgentCore(new ProjectStore(config.workspaceRoot), { asr, tts, ...(voice ? { voice } : {}), planner, renderer: new FFmpegRenderer(config.executables.ffmpeg), previewSelfCheck: selfCheckPreview, mediaProbe: { probe: (uri) => probeMedia(uri, config.executables.ffprobe) }, visual: new FFmpegVisualEvidenceProvider(config.executables.ffmpeg), ...(config.providers.alignment === "whisperx" && whisperx ? { alignment: whisperx } : {}), ...(config.providers.diarization === "whisperx" && whisperx ? { diarization: whisperx } : {}) }, { ...config.limits, jobMaxAttempts: config.jobs.maxAttempts, baseRetryMs: config.jobs.baseRetryMs }, new StructuredLogger(config.logging.level), host.primitives, host.background);
+  const store = new ProjectStore(config.workspaceRoot);
+  const voiceReferenceAnalyzer = new FFmpegVoiceReferenceAnalyzer(config.executables.ffmpeg);
+
+  // Keep Node-only FFmpeg acoustics at the composition boundary. The portable Core still owns the
+  // VoiceReferenceQualityReport and enrollment semantics; mobile can supply a native analyzer later.
+  class NodeRuntimeCore extends VideoAgentCore {
+    override analyzeVoiceReference(projectId: string, assetId: string, speakerId?: string) {
+      return analyzeVoiceReferencePortable(host.primitives, store, projectId, assetId, speakerId, voiceReferenceAnalyzer);
+    }
+  }
+
+  return new NodeRuntimeCore(store, { asr, tts, ...(voice ? { voice } : {}), planner, renderer: new FFmpegRenderer(config.executables.ffmpeg), previewSelfCheck: selfCheckPreview, mediaProbe: { probe: (uri) => probeMedia(uri, config.executables.ffprobe) }, visual: new FFmpegVisualEvidenceProvider(config.executables.ffmpeg), ...(config.providers.alignment === "whisperx" && whisperx ? { alignment: whisperx } : {}), ...(config.providers.diarization === "whisperx" && whisperx ? { diarization: whisperx } : {}) }, { ...config.limits, jobMaxAttempts: config.jobs.maxAttempts, baseRetryMs: config.jobs.baseRetryMs }, new StructuredLogger(config.logging.level), host.primitives, host.background);
 }
