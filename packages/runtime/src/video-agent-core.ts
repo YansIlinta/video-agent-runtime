@@ -94,7 +94,7 @@ export class VideoAgentCore {
     if (quality.speechDurationUs < 3_000_000 || quality.usableSpeechPercentage < 20) throw new Error("Voice reference quality is insufficient for enrollment");
 
     const referencePolicy = provider.cloneReferencePolicy?.();
-    let reference;
+    let reference: ReturnType<typeof selectVoiceReference>;
     if (referencePolicy && project.activeTranscriptId) {
       const transcript = await this.store.readTranscript(projectId, project.activeTranscriptId);
       if (transcript.assetId === asset.id) reference = selectVoiceReference(transcript, quality, input.speakerId, referencePolicy);
