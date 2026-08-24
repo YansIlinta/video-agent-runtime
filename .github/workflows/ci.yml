@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, runtime-hardening-asr-llm-tts]
+    branches: [main, runtime-hardening-asr-llm-tts, speech-acceptance-summary]
 
 permissions:
   contents: read
@@ -23,6 +23,7 @@ jobs:
       - run: npm test -- --maxWorkers=1
       - run: npm run build
       - run: npm run eval:speech-real
+      - run: npm run benchmark:speech-summary
       - run: npm run smoke:speech-mcp
       - run: npm --prefix apps/mobile ci
       - run: npm run typecheck:mobile
