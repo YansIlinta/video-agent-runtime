@@ -79,16 +79,17 @@ export class VideoAgentFacade {
     if (config.model !== "gpt-4o-transcribe-diarize" && config.model !== "whisper-1") throw new Error("Mobile ASR requires gpt-4o-transcribe-diarize or whisper-1 so edits always have timestamps");
     const saved = await this.settings.saveToSlot("asr", config, apiKey);
     const credential = saved.credentialRef ? await this.settings.credential(saved.credentialRef) : undefined;
-    const provider = new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl);
+    const provider = new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl, () => this.primitives.ids.create());
     this.asr.set(provider);
     return { config: saved, health: await provider.health() };
   }
 
   async configureTTS(config: ProviderConfig, apiKey?: string) {
+    if (!this.speechNative) throw new Error("NativeSpeechHost is not installed; generated audio must not cross the JS bridge as base64");
     assertOfficialSpeechConfig(config, "TTS");
     const saved = await this.settings.saveToSlot("tts", config, apiKey);
     const credential = saved.credentialRef ? await this.settings.credential(saved.credentialRef) : undefined;
-    const provider = new MobileOpenAITTSProvider(saved.model, credential, this.http, saved.baseUrl);
+    const provider = new MobileOpenAITTSProvider(saved.model, credential, this.speechNative, this.http, saved.baseUrl, () => this.primitives.ids.create());
     this.tts.set(provider);
     return { config: saved, health: await provider.health() };
   }
@@ -100,13 +101,13 @@ export class VideoAgentFacade {
       if (!["openai", "openai-compatible", "custom"].includes(saved.kind)) throw new Error(`${saved.kind} planner implementation is not included on mobile`);
       this.planner.set(new OpenAILLMProvider(saved.model, credential, saved.baseUrl, 120_000, this.http, this.primitives, saved.reasoning)); this.plannerConfig = saved; return;
     }
+    if (!this.speechNative) throw new Error("NativeSpeechHost is not installed");
     if (slot === "asr") {
-      if (!this.speechNative) throw new Error("NativeSpeechHost is not installed");
       assertOfficialSpeechConfig(saved, "ASR");
       if (saved.model !== "gpt-4o-transcribe-diarize" && saved.model !== "whisper-1") throw new Error("Saved ASR configuration is not supported by this mobile build");
-      this.asr.set(new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl)); return;
+      this.asr.set(new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl, () => this.primitives.ids.create())); return;
     }
-    assertOfficialSpeechConfig(saved, "TTS"); this.tts.set(new MobileOpenAITTSProvider(saved.model, credential, this.http, saved.baseUrl));
+    assertOfficialSpeechConfig(saved, "TTS"); this.tts.set(new MobileOpenAITTSProvider(saved.model, credential, this.speechNative, this.http, saved.baseUrl, () => this.primitives.ids.create()));
   }
 
   async restoreProviderSlots() {
