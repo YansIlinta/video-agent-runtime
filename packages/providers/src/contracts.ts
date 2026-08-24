@@ -13,32 +13,9 @@ export interface ASRCapabilities {
   forcedAlignment: boolean;
 }
 
-export interface ASRWordResult {
-  text: string;
-  startSeconds: number;
-  endSeconds: number;
-  confidence?: number;
-  speaker?: string;
-}
-
-export interface ASRSegmentResult {
-  text: string;
-  startSeconds: number;
-  endSeconds: number;
-  confidence?: number;
-  speaker?: string;
-  language?: string;
-  words: ASRWordResult[];
-  alignmentFailed?: boolean;
-}
-
-export interface ASRResult {
-  language?: string;
-  languageConfidence?: number;
-  segments: ASRSegmentResult[];
-  warnings: string[];
-}
-
+export interface ASRWordResult { text: string; startSeconds: number; endSeconds: number; confidence?: number; speaker?: string }
+export interface ASRSegmentResult { text: string; startSeconds: number; endSeconds: number; confidence?: number; speaker?: string; language?: string; words: ASRWordResult[]; alignmentFailed?: boolean }
+export interface ASRResult { language?: string; languageConfidence?: number; segments: ASRSegmentResult[]; warnings: string[] }
 export interface ASRProvider {
   readonly id: string;
   readonly model: string;
@@ -62,12 +39,7 @@ export interface TTSCapabilities {
   phonemeAlignment: boolean;
 }
 
-export interface TTSWordTiming {
-  text: string;
-  startSeconds: number;
-  endSeconds: number;
-}
-
+export interface TTSWordTiming { text: string; startSeconds: number; endSeconds: number }
 export interface TTSResult {
   audio: Uint8Array;
   format: "wav";
@@ -78,13 +50,21 @@ export interface TTSResult {
   voiceId: string;
   license?: { code: string; weights: string; voice: string; commercialUse: boolean; sourceUrl: string };
 }
+export type TTSFileResult = Omit<TTSResult, "audio">;
+export interface TTSInput { text: string; voiceId: string; language: string; speed?: number }
 
 export interface TTSProvider {
   readonly id: string;
   readonly model: string;
   capabilities(): TTSCapabilities;
   listVoices?(): Promise<VoiceProfile[]>;
-  synthesize(input: { text: string; voiceId: string; language: string; speed?: number }, context?: OperationContext): Promise<TTSResult>;
+  synthesize(input: TTSInput, context?: OperationContext): Promise<TTSResult>;
+  /**
+   * Optional zero-copy path for hosts where binary media should not cross the JS/runtime boundary.
+   * The provider must create `outputUri` completely before resolving; callers own cleanup on any
+   * later metadata failure. Providers without this method keep the ordinary byte-returning path.
+   */
+  synthesizeToFile?(input: TTSInput & { outputUri: string }, context?: OperationContext): Promise<TTSFileResult>;
   health?(): Promise<ProviderHealth>;
 }
 
@@ -128,14 +108,7 @@ export interface RenderRequest {
   signal?: AbortSignal;
   onProgress?: OperationContext["onProgress"];
 }
-
-export interface RenderResult {
-  outputPath: string;
-  durationUs: number;
-  mode: "preview" | "final";
-  warnings: string[];
-}
-
+export interface RenderResult { outputPath: string; durationUs: number; mode: "preview" | "final"; warnings: string[] }
 export interface RendererCapabilities {
   trim: boolean;
   concat: boolean;
@@ -148,7 +121,6 @@ export interface RendererCapabilities {
   overlay: boolean;
   backgroundExport: boolean;
 }
-
 export interface Renderer {
   readonly id: string;
   capabilities?(): RendererCapabilities;
