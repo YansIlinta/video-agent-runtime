@@ -42,6 +42,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
     private readonly python = process.env.VIDEO_AGENT_PYTHON ?? "python",
     voiceRoot = process.env.VIDEO_AGENT_QWEN3_TTS_VOICES ?? path.join(os.homedir(), ".video-agent", "qwen3-tts", "voices"),
     private readonly timeoutMs = 30 * 60_000,
+    private readonly ffmpeg = process.env.FFMPEG_PATH ?? "ffmpeg",
   ) { this.voiceRoot = voiceRoot; }
 
   capabilities() { return { streaming: false, voiceSelection: true, voiceCloning: true, styleControl: false, speedControl: false, multilingual: true, timestamps: false, phonemeAlignment: false }; }
@@ -82,7 +83,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
     if (range) args.push("-t", String(Math.max(0.1, Math.min(CLONE_REFERENCE_POLICY.maxDurationSeconds, range.end - range.start)))); else args.push("-t", String(CLONE_REFERENCE_POLICY.maxDurationSeconds));
     args.push("-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", output);
     context?.onProgress?.(0.05, "voice-reference", "Extracting a bounded mono voice reference");
-    const result = await runProcess("ffmpeg", args, { timeoutMs: 120_000, maxOutputBytes: 2 * 1024 * 1024, ...(context?.signal ? { signal: context.signal } : {}) });
+    const result = await runProcess(this.ffmpeg, args, { timeoutMs: 120_000, maxOutputBytes: 2 * 1024 * 1024, ...(context?.signal ? { signal: context.signal } : {}) });
     if (result.exitCode !== 0) throw new Error(`Unable to extract Qwen3 voice reference: ${result.stderr.slice(-2_000)}`);
     if ((await stat(output)).size < 1_024) throw new Error("Extracted Qwen3 voice reference is empty");
   }
@@ -154,7 +155,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
     try {
       const [python, ffmpeg] = await Promise.all([
         runProcess(this.python, ["-c", "import qwen_tts, torch, soundfile; print('ready')"], { timeoutMs: 10_000, maxOutputBytes: 100_000 }),
-        runProcess("ffmpeg", ["-version"], { timeoutMs: 5_000, maxOutputBytes: 100_000 }),
+        runProcess(this.ffmpeg, ["-version"], { timeoutMs: 5_000, maxOutputBytes: 100_000 }),
       ]);
       const ready = python.exitCode === 0 && ffmpeg.exitCode === 0;
       return { id: this.id, status: ready ? "ready" as const : "unavailable" as const, message: ready ? `${this.model} runtime installed; weights load on demand` : `${python.stderr.slice(-300)} ${ffmpeg.stderr.slice(-300)}`.trim(), capabilities: this.voiceCapabilities() };
