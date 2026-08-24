@@ -1,5 +1,5 @@
 import type { VoiceProfile } from "../../core/src/schemas.js";
-import type { ASRCapabilities, ASRProvider, ASRResult, ASRSegmentResult, OperationContext, ProviderHealth, TTSProvider, TTSResult } from "../../providers/src/contracts.js";
+import type { ASRCapabilities, ASRProvider, ASRResult, ASRSegmentResult, OperationContext, ProviderHealth, TTSFileResult, TTSInput, TTSProvider, TTSResult } from "../../providers/src/contracts.js";
 import type { HttpAdapter } from "../../platform/src/contracts.js";
 import type { MobileOpenAIASRModel, NativeSpeechHostBridge } from "./native-speech-bridge.js";
 
@@ -7,13 +7,19 @@ const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_TTS_TEXT_CHARS = 4_096;
 const MAX_TTS_RESPONSE_BYTES = 32 * 1024 * 1024;
 const OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"] as const;
+const fallbackId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 interface DiarizedResponse { text?: string; segments?: Array<{ start: number; end: number; text: string; speaker: string }> }
 interface WhisperVerboseResponse { language?: string; text?: string; segments?: Array<{ start: number; end: number; text: string; avg_logprob?: number }>; words?: Array<{ start: number; end: number; word: string }> }
 
 function finiteTimestamp(value: number, label: string) { if (!Number.isFinite(value) || value < 0) throw new Error(`OpenAI transcription returned invalid ${label}`); return value; }
 function cancellation(signal?: AbortSignal) { return signal?.reason instanceof Error ? signal.reason : new Error("Speech request cancelled"); }
-function officialOpenAIBase(baseUrl: string) { const normalized = baseUrl.replace(/\/+$/u, ""); if (normalized !== OPENAI_BASE_URL) throw new Error("Mobile media upload is pinned to https://api.openai.com/v1; arbitrary file-upload endpoints are intentionally not supported"); return normalized; }
+function officialOpenAIBase(baseUrl: string) { const normalized = baseUrl.replace(/\/+$/u, ""); if (normalized !== OPENAI_BASE_URL) throw new Error("Mobile speech is pinned to https://api.openai.com/v1; arbitrary media endpoints are intentionally not supported"); return normalized; }
+function apiVoiceId(voiceId: string) { return voiceId.startsWith("openai-") ? voiceId.slice("openai-".length) : voiceId; }
+function validateTtsInput(input: TTSInput) {
+  if (!input.text.trim()) throw new Error("TTS text cannot be empty");
+  if (input.text.length > MAX_TTS_TEXT_CHARS) throw new Error(`TTS text exceeds ${MAX_TTS_TEXT_CHARS} characters; split narration into timeline-sized chunks`);
+}
 
 function normalizeTranscription(model: MobileOpenAIASRModel, rawText: string, options: { language?: string; prompt?: string }): ASRResult {
   const warnings: string[] = [];
@@ -43,13 +49,13 @@ function normalizeTranscription(model: MobileOpenAIASRModel, rawText: string, op
 
 export class MobileOpenAIASRProvider implements ASRProvider {
   readonly id = "openai-asr-mobile";
-  constructor(readonly model: MobileOpenAIASRModel, private readonly apiKey: string | undefined, private readonly native: NativeSpeechHostBridge, private readonly http: HttpAdapter, baseUrl = OPENAI_BASE_URL) { officialOpenAIBase(baseUrl); }
+  constructor(readonly model: MobileOpenAIASRModel, private readonly apiKey: string | undefined, private readonly native: NativeSpeechHostBridge, private readonly http: HttpAdapter, baseUrl = OPENAI_BASE_URL, private readonly createRequestId: () => string = fallbackId) { officialOpenAIBase(baseUrl); }
   capabilities(): ASRCapabilities { return this.model === "gpt-4o-transcribe-diarize" ? { wordTimestamps: false, segmentTimestamps: true, speakerDiarization: true, languageDetection: false, streaming: false, confidence: false, forcedAlignment: false } : { wordTimestamps: true, segmentTimestamps: true, speakerDiarization: false, languageDetection: true, streaming: false, confidence: true, forcedAlignment: false }; }
   private key() { if (!this.apiKey) throw new Error("OpenAI API key is required for mobile ASR"); return this.apiKey; }
   async transcribe(inputPath: string, options: { language?: string; prompt?: string } = {}, context?: OperationContext): Promise<ASRResult> {
     if (context?.signal?.aborted) throw cancellation(context.signal);
     if (!inputPath.startsWith("project://")) throw new Error("Mobile ASR accepts only durable project:// assets");
-    const requestId = `asr-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const requestId = `asr-${this.createRequestId()}`;
     const onAbort = () => { void this.native.cancelTranscription(requestId); };
     context?.signal?.addEventListener("abort", onAbort, { once: true });
     try {
@@ -77,16 +83,30 @@ function wavDuration(bytes: Uint8Array): { durationSeconds: number; sampleRate: 
 
 export class MobileOpenAITTSProvider implements TTSProvider {
   readonly id = "openai-tts-mobile";
-  constructor(readonly model = "gpt-4o-mini-tts", private readonly apiKey: string | undefined, private readonly http: HttpAdapter, private readonly baseUrl = OPENAI_BASE_URL) { officialOpenAIBase(baseUrl); }
+  constructor(readonly model = "gpt-4o-mini-tts", private readonly apiKey: string | undefined, private readonly native: NativeSpeechHostBridge, private readonly http: HttpAdapter, private readonly baseUrl = OPENAI_BASE_URL, private readonly createRequestId: () => string = fallbackId) { officialOpenAIBase(baseUrl); }
   capabilities() { return { streaming: false, voiceSelection: true, voiceCloning: false, styleControl: false, speedControl: true, multilingual: true, timestamps: false, phonemeAlignment: false }; }
   private key() { if (!this.apiKey) throw new Error("OpenAI API key is required for mobile TTS"); return this.apiKey; }
   async listVoices(): Promise<VoiceProfile[]> { return OPENAI_VOICES.map((voice) => ({ id: `openai-${voice}`, type: "preset", provider: this.id, providerVoiceId: voice, model: this.model, name: voice, languages: ["multilingual"], cloning: false, status: "active", referenceAssetIds: [], authorizationStatus: "not_required", createdAt: new Date(0).toISOString(), usageRestrictions: ["Disclose generated audio as AI-generated", "Availability and use remain subject to provider terms"], providerMetadata: {} })); }
-  async synthesize(input: { text: string; voiceId: string; language: string; speed?: number }, context?: OperationContext): Promise<TTSResult> {
-    if (context?.signal?.aborted) throw cancellation(context.signal); if (!input.text.trim()) throw new Error("TTS text cannot be empty"); if (input.text.length > MAX_TTS_TEXT_CHARS) throw new Error(`TTS text exceeds ${MAX_TTS_TEXT_CHARS} characters; split narration into timeline-sized chunks`);
+  async synthesizeToFile(input: TTSInput & { outputUri: string }, context?: OperationContext): Promise<TTSFileResult> {
+    if (context?.signal?.aborted) throw cancellation(context.signal); validateTtsInput(input);
+    if (!input.outputUri.startsWith("project://")) throw new Error("Mobile TTS output must be a durable project:// URI");
+    const requestId = `tts-${this.createRequestId()}`; const voiceId = apiVoiceId(input.voiceId);
+    const onAbort = () => { void this.native.cancelSynthesis(requestId); }; context?.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      context?.onProgress?.(0.05, "tts-request", "Generating narration directly to project storage");
+      const result = await this.native.synthesizeOpenAI({ requestId, outputUri: input.outputUri as `project://${string}`, apiKey: this.key(), model: this.model, text: input.text, voiceId, ...(input.speed === undefined ? {} : { speed: input.speed }), timeoutMs: 120_000 });
+      if (context?.signal?.aborted) throw cancellation(context.signal);
+      context?.onProgress?.(1, "tts-complete", "Narration generated");
+      return { format: "wav", durationSeconds: result.durationSeconds, sampleRate: result.sampleRate, wordTimings: [], model: result.model, voiceId: result.voiceId };
+    } finally { context?.signal?.removeEventListener("abort", onAbort); }
+  }
+  /** Byte-returning fallback kept for provider-level tests and non-Core callers. Core uses synthesizeToFile on mobile. */
+  async synthesize(input: TTSInput, context?: OperationContext): Promise<TTSResult> {
+    if (context?.signal?.aborted) throw cancellation(context.signal); validateTtsInput(input); const voiceId = apiVoiceId(input.voiceId);
     context?.onProgress?.(0.05, "tts-request", "Generating narration");
-    const response = await this.http.request({ method: "POST", url: `${this.baseUrl}/audio/speech`, headers: { authorization: `Bearer ${this.key()}`, "content-type": "application/json" }, body: JSON.stringify({ model: this.model, input: input.text, voice: input.voiceId, response_format: "wav", speed: input.speed ?? 1 }), timeoutMs: 120_000, ...(context?.signal ? { signal: context.signal } : {}) });
+    const response = await this.http.request({ method: "POST", url: `${this.baseUrl}/audio/speech`, headers: { authorization: `Bearer ${this.key()}`, "content-type": "application/json" }, body: JSON.stringify({ model: this.model, input: input.text, voice: voiceId, response_format: "wav", speed: input.speed ?? 1 }), timeoutMs: 120_000, ...(context?.signal ? { signal: context.signal } : {}) });
     if (response.status < 200 || response.status >= 300) throw new Error(`OpenAI TTS failed (${response.status}): ${new TextDecoder().decode(response.body.slice(0, 1_000))}`); if (response.body.byteLength > MAX_TTS_RESPONSE_BYTES) throw new Error(`TTS response exceeds ${MAX_TTS_RESPONSE_BYTES} bytes; use shorter narration chunks`); if (context?.signal?.aborted) throw cancellation(context.signal);
-    const measured = wavDuration(response.body); context?.onProgress?.(1, "tts-complete", "Narration generated"); return { audio: response.body, format: "wav", durationSeconds: measured.durationSeconds, sampleRate: measured.sampleRate, wordTimings: [], model: this.model, voiceId: input.voiceId };
+    const measured = wavDuration(response.body); context?.onProgress?.(1, "tts-complete", "Narration generated"); return { audio: response.body, format: "wav", durationSeconds: measured.durationSeconds, sampleRate: measured.sampleRate, wordTimings: [], model: this.model, voiceId };
   }
   async health(): Promise<ProviderHealth> {
     if (!this.apiKey) return { id: this.id, status: "unavailable", message: "OpenAI API key is not configured", capabilities: { ...this.capabilities() } };
@@ -114,6 +134,7 @@ export class MutableTTSProvider implements TTSProvider {
   private provider() { if (!this.current) throw new Error("Configure a TTS provider before speech generation"); return this.current; }
   capabilities() { return this.current?.capabilities() ?? { streaming: false, voiceSelection: false, voiceCloning: false, styleControl: false, speedControl: false, multilingual: false, timestamps: false, phonemeAlignment: false }; }
   listVoices() { return this.current?.listVoices?.() ?? Promise.resolve([]); }
-  synthesize(input: { text: string; voiceId: string; language: string; speed?: number }, context?: OperationContext) { return this.provider().synthesize(input, context); }
+  synthesize(input: TTSInput, context?: OperationContext) { return this.provider().synthesize(input, context); }
+  get synthesizeToFile(): TTSProvider["synthesizeToFile"] { const provider = this.current; return provider?.synthesizeToFile ? provider.synthesizeToFile.bind(provider) : undefined; }
   health() { return this.current?.health?.() ?? Promise.resolve({ id: this.id, status: "unavailable" as const, message: "TTS provider is not configured", capabilities: { ...this.capabilities() } }); }
 }
