@@ -42,7 +42,7 @@ export interface TTSProvider {
   listVoices?(): Promise<VoiceProfile[]>;
   synthesize(input: TTSInput, context?: OperationContext): Promise<TTSResult>;
   /** Optional zero-copy path for hosts where binary media should not cross the JS/runtime boundary. */
-  synthesizeToFile?(input: TTSInput & { outputUri: string }, context?: OperationContext): Promise<TTSFileResult>;
+  synthesizeToFile?: ((input: TTSInput & { outputUri: string }, context?: OperationContext) => Promise<TTSFileResult>) | undefined;
   health?(): Promise<ProviderHealth>;
 }
 
