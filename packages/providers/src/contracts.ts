@@ -79,8 +79,14 @@ export interface VoiceProvider extends TTSProvider {
 }
 
 export interface LLMCapabilities { structuredOutput: boolean; cancellation: boolean; tokenUsage: boolean; repair: boolean }
-export interface StructuredGenerationRequest<T> { requestId: string; projectId?: string; operation: "strategy" | "edit-plan" | "patch-plan"; instructions: string; input: string; schemaName: string; schema: ZodType<T>; jsonSchema: Record<string, unknown>; maxRetries?: number; signal?: AbortSignal }
+/** Generic structured-generation request shared by editing planners and lightweight speech transforms. */
+export interface StructuredGenerationRequest<T> { requestId: string; projectId?: string; operation: string; instructions: string; input: string; schemaName: string; schema: ZodType<T>; jsonSchema: Record<string, unknown>; maxRetries?: number; signal?: AbortSignal }
 export interface StructuredGenerationResult<T> { value: T; metadata: ProviderCall }
+export interface StructuredTextGenerator {
+  readonly id: string;
+  readonly model?: string;
+  generateStructured<T>(request: StructuredGenerationRequest<T>): Promise<StructuredGenerationResult<T>>;
+}
 export interface ProviderHealth { id: string; status: "ready" | "unavailable" | "degraded"; message: string; capabilities?: Record<string, unknown> }
 export interface LLMProvider {
   readonly id: string;
