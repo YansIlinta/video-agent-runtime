@@ -48,15 +48,14 @@ jobs:
         with:
           gradle-version: 9.4.1
       - run: npm --prefix apps/mobile ci
-      - name: Install Android SDK 37 and NDK
+      - name: Install stable Android SDK 36 and NDK
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" \
-            "platforms;android-37" \
-            "build-tools;37.0.0" \
-            "ndk;27.1.12297006" \
-            --channel=3
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
       - name: Generate React Native Android codegen
         run: npm --prefix apps/mobile run codegen:android
       - name: Compile Android native host
