@@ -18,6 +18,7 @@
     "mcp": "tsx packages/mcp/src/server.ts",
     "speech:mcp": "tsx packages/speech-mcp/src/server.ts",
     "smoke:mcp": "tsx scripts/mcp-smoke.ts",
+    "smoke:speech-mcp": "tsx scripts/speech-mcp-smoke.ts",
     "demo": "tsx scripts/demo.ts",
     "eval": "tsx evals/run.ts",
     "benchmark:queue": "tsx scripts/queue-benchmark.ts",
