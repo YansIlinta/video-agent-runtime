@@ -151,14 +151,23 @@ export async function synthesizeTranslation(
       "tts",
       `Synthesizing segment ${index + 1}/${translation.segments.length}`,
     );
-    const result = await tts.synthesize({
+    const audioPath = path.join(options.outputDirectory, `segment-${String(index).padStart(4, "0")}.wav`);
+    const ttsInput = {
       text: translated.targetText,
       voiceId: options.voiceId,
       language: translation.targetLanguage,
       ...(options.speed === undefined ? {} : { speed: options.speed }),
-    }, { ...(options.signal ? { signal: options.signal } : {}) });
-    const audioPath = path.join(options.outputDirectory, `segment-${String(index).padStart(4, "0")}.wav`);
-    await writeFile(audioPath, result.audio, { flag: "wx" });
+    };
+    const context = { ...(options.signal ? { signal: options.signal } : {}) };
+    let generatedDurationSeconds: number;
+    if (tts.synthesizeToFile) {
+      const result = await tts.synthesizeToFile({ ...ttsInput, outputUri: audioPath }, context);
+      generatedDurationSeconds = result.durationSeconds;
+    } else {
+      const result = await tts.synthesize(ttsInput, context);
+      await writeFile(audioPath, result.audio, { flag: "wx" });
+      generatedDurationSeconds = result.durationSeconds;
+    }
     generated.push({
       index: translated.index,
       sourceStartSeconds: sourceSegment.startSeconds,
@@ -166,7 +175,7 @@ export async function synthesizeTranslation(
       sourceText: sourceSegment.text,
       targetText: translated.targetText,
       audioPath,
-      generatedDurationSeconds: result.durationSeconds,
+      generatedDurationSeconds,
     });
   }
 
