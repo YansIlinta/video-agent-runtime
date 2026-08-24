@@ -6,7 +6,7 @@ import { secondsToUs } from "../../core/src/index.js";
 import { createRuntime } from "../../runtime/src/index.js";
 
 const core = createRuntime();
-const server = new McpServer({ name: "video-agent-runtime", version: "0.2.0" }, { capabilities: { logging: {} } });
+const server = new McpServer({ name: "video-agent-runtime", version: "0.4.0" }, { capabilities: { logging: {} } });
 const outputSchema = z.object({ result: z.unknown() });
 
 function register<T extends z.ZodRawShape>(name: string, description: string, inputSchema: z.ZodObject<T>, handler: (input: z.infer<z.ZodObject<T>>) => Promise<unknown>) {
