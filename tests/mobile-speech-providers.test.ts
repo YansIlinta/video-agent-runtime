@@ -4,7 +4,7 @@ import type { NativeOpenAITranscriptionRequest, NativeOpenAITTSRequest, NativeSp
 import { MobileOpenAIASRProvider, MobileOpenAITTSProvider, MutableASRProvider } from "../packages/mobile/src/speech-providers.js";
 
 class FakeHttp implements HttpAdapter {
-  constructor(private readonly body = new Uint8Array(), private readonly status = 200) {}
+  constructor(private readonly body: Uint8Array<ArrayBufferLike> = new Uint8Array(), private readonly status = 200) {}
   requests: Parameters<HttpAdapter["request"]>[0][] = [];
   async request(request: Parameters<HttpAdapter["request"]>[0]) { this.requests.push(request); return { status: this.status, headers: {}, body: this.body }; }
 }
