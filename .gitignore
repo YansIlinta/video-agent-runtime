@@ -7,3 +7,4 @@ work/upstream/
 .env.*
 !.env.example
 demo-workspace/
+evals/results/
