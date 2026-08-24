@@ -76,6 +76,7 @@ export function normalizeAsrResult(assetId: string, provider: ASRProvider, resul
   }
   const rawTranscript = result.segments.map((segment) => segment.text).join(" ");
   const normalizedTranscript = rawTranscript.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const silenceRegions = inferSilences(words);
   return {
     schemaVersion: 1,
     id: randomUUID(),
@@ -90,7 +91,7 @@ export function normalizeAsrResult(assetId: string, provider: ASRProvider, resul
     words,
     segments,
     speakers: [...speakers].map((id) => ({ id })),
-    silenceRegions: inferSilences(words),
+    silenceRegions,
     quality: {
       lowConfidenceWordIds: words.filter((word) => (word.confidence ?? 1) < 0.65).map((word) => word.id),
       unmappedWordIds: [],
@@ -98,7 +99,7 @@ export function normalizeAsrResult(assetId: string, provider: ASRProvider, resul
       speakerOverlapRanges: [],
       unknownLanguageSegmentIds: result.language ? [] : segments.map((segment) => segment.id),
       musicHeavyRanges: [],
-      longSilenceRanges: inferSilences(words).filter((silence) => silence.endUs - silence.startUs >= secondsToUs(2)),
+      longSilenceRanges: silenceRegions.filter((silence) => silence.endUs - silence.startUs >= secondsToUs(2)),
       warnings: result.warnings,
     },
     cacheKey,
