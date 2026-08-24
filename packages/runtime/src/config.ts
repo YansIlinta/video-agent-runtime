@@ -7,11 +7,11 @@ const configSchema = z.object({
   providers: z.object({
     planner: z.enum(["fake", "openai"]),
     plannerModel: z.string(),
-    asr: z.enum(["fake", "faster-whisper", "openai"]),
+    asr: z.enum(["fake", "faster-whisper", "qwen3-asr", "openai"]),
     asrModel: z.string(),
     alignment: z.enum(["none", "whisperx"]),
     diarization: z.enum(["none", "whisperx"]),
-    tts: z.enum(["fake", "kokoro", "openai"]),
+    tts: z.enum(["fake", "kokoro", "qwen3-tts", "openai"]),
     ttsModel: z.string(),
   }),
   executables: z.object({ python: z.string(), ffmpeg: z.string(), ffprobe: z.string() }),
@@ -52,19 +52,19 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env, cwd = pr
   const executableFile = fileConfig.executables ?? {} as RuntimeConfig["executables"];
   const limitFile = fileConfig.limits ?? {} as RuntimeConfig["limits"];
   const jobFile = fileConfig.jobs ?? {} as RuntimeConfig["jobs"];
-  const selectedAsr = env.VIDEO_AGENT_ASR === "faster-whisper" || env.VIDEO_AGENT_ASR === "openai" ? env.VIDEO_AGENT_ASR : providerFile.asr ?? "fake";
-  const selectedTts = env.VIDEO_AGENT_TTS === "kokoro" || env.VIDEO_AGENT_TTS === "openai" ? env.VIDEO_AGENT_TTS : providerFile.tts ?? "fake";
+  const selectedAsr = env.VIDEO_AGENT_ASR === "faster-whisper" || env.VIDEO_AGENT_ASR === "qwen3-asr" || env.VIDEO_AGENT_ASR === "openai" ? env.VIDEO_AGENT_ASR : providerFile.asr ?? "fake";
+  const selectedTts = env.VIDEO_AGENT_TTS === "kokoro" || env.VIDEO_AGENT_TTS === "qwen3-tts" || env.VIDEO_AGENT_TTS === "openai" ? env.VIDEO_AGENT_TTS : providerFile.tts ?? "fake";
   return configSchema.parse({
     workspaceRoot: path.resolve(env.VIDEO_AGENT_WORKSPACE ?? fileConfig.workspaceRoot ?? path.join(cwd, "video-projects")),
     providers: {
       planner: env.VIDEO_AGENT_PLANNER === "openai" ? "openai" : providerFile.planner ?? "fake",
       plannerModel: env.OPENAI_MODEL ?? providerFile.plannerModel ?? "gpt-5.4-mini",
       asr: selectedAsr,
-      asrModel: env.VIDEO_AGENT_ASR_MODEL ?? providerFile.asrModel ?? (selectedAsr === "openai" ? "gpt-4o-transcribe-diarize" : "small"),
+      asrModel: env.VIDEO_AGENT_ASR_MODEL ?? providerFile.asrModel ?? (selectedAsr === "openai" ? "gpt-4o-transcribe-diarize" : selectedAsr === "qwen3-asr" ? "Qwen/Qwen3-ASR-0.6B" : "small"),
       alignment: env.VIDEO_AGENT_ALIGNMENT === "whisperx" ? "whisperx" : providerFile.alignment ?? "none",
       diarization: env.VIDEO_AGENT_DIARIZATION === "whisperx" ? "whisperx" : providerFile.diarization ?? "none",
       tts: selectedTts,
-      ttsModel: env.VIDEO_AGENT_TTS_MODEL ?? providerFile.ttsModel ?? (selectedTts === "openai" ? "gpt-4o-mini-tts" : "hexgrad/Kokoro-82M"),
+      ttsModel: env.VIDEO_AGENT_TTS_MODEL ?? providerFile.ttsModel ?? (selectedTts === "openai" ? "gpt-4o-mini-tts" : selectedTts === "qwen3-tts" ? "Qwen/Qwen3-TTS-12Hz-0.6B-Base" : "hexgrad/Kokoro-82M"),
     },
     executables: { python: env.VIDEO_AGENT_PYTHON ?? executableFile.python ?? "python", ffmpeg: env.FFMPEG_PATH ?? executableFile.ffmpeg ?? "ffmpeg", ffprobe: env.FFPROBE_PATH ?? executableFile.ffprobe ?? "ffprobe" },
     limits: {
