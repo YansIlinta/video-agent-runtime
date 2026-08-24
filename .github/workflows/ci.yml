@@ -1,8 +1,9 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches: [main, runtime-hardening-asr-llm-tts]
 
 permissions:
   contents: read
@@ -19,7 +20,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: npm test -- --maxWorkers=1
       - run: npm run build
+      - run: npm run smoke:speech-mcp
       - run: npm --prefix apps/mobile ci
       - run: npm run typecheck:mobile

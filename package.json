@@ -6,7 +6,8 @@
   "description": "Agent-native, headless video editing runtime with CLI, MCP, speech providers, durable Edit IR, and FFmpeg rendering.",
   "bin": {
     "video-agent": "./dist/apps/cli/src/index.js",
-    "video-agent-mcp": "./dist/packages/mcp/src/server.js"
+    "video-agent-mcp": "./dist/packages/mcp/src/server.js",
+    "video-agent-speech-mcp": "./dist/packages/speech-mcp/src/server.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -15,24 +16,26 @@
     "test:watch": "vitest",
     "cli": "tsx apps/cli/src/index.ts",
     "mcp": "tsx packages/mcp/src/server.ts",
+    "speech:mcp": "tsx packages/speech-mcp/src/server.ts",
     "smoke:mcp": "tsx scripts/mcp-smoke.ts",
-    "demo": "tsx scripts/demo.ts"
-    ,"eval": "tsx evals/run.ts"
-    ,"benchmark:queue": "tsx scripts/queue-benchmark.ts"
-    ,"eval:voice": "tsx evals/voice-run.ts"
-    ,"benchmark:voice": "tsx scripts/voice-benchmark.ts"
-    ,"benchmark:mobile-host": "tsx scripts/mobile-host-benchmark.ts"
-    ,"test:mobile-native-contracts": "vitest run tests/native-mobile-host.test.ts"
-    ,"mobile:install": "npm --prefix apps/mobile install"
-    ,"typecheck:mobile": "npm --prefix apps/mobile run typecheck"
+    "smoke:speech-mcp": "tsx scripts/speech-mcp-smoke.ts",
+    "demo": "tsx scripts/demo.ts",
+    "eval": "tsx evals/run.ts",
+    "benchmark:queue": "tsx scripts/queue-benchmark.ts",
+    "eval:voice": "tsx evals/voice-run.ts",
+    "benchmark:voice": "tsx scripts/voice-benchmark.ts",
+    "benchmark:mobile-host": "tsx scripts/mobile-host-benchmark.ts",
+    "test:mobile-native-contracts": "vitest run tests/native-mobile-host.test.ts",
+    "mobile:install": "npm --prefix apps/mobile install",
+    "typecheck:mobile": "npm --prefix apps/mobile run typecheck"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "zod": "^3.25.76"
-    ,"zod-to-json-schema": "^3.25.2"
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
