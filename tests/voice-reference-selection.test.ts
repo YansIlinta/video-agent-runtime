@@ -60,6 +60,17 @@ describe("voice reference selection", () => {
     expect(selected).toBeUndefined();
   });
 
+  it("rejects unlabeled overlap inside a known multi-speaker transcript", () => {
+    const value = transcript();
+    value.segments = [
+      { ...value.segments[0]!, endUs: 7_000_000, wordIds: ["w1", "w2", "w3", "w4", "w5", "w6"] },
+      { id: "unknown", startUs: 7_000_000, endUs: 7_500_000, rawText: "uncertain", normalizedText: "uncertain", displayText: "uncertain", wordIds: [], language: "en", confidence: 0.5 },
+      value.segments[1]!,
+    ];
+    const selected = selectVoiceReference(value, quality([{ startUs: 1_000_000, endUs: 7_500_000, score: 1, reasons: ["contains unlabeled interval"] }]), "A");
+    expect(selected).toBeUndefined();
+  });
+
   it("fails clearly when a requested speaker is absent", () => {
     expect(() => selectVoiceReference(transcript(), quality([{ startUs: 1_000_000, endUs: 8_000_000, score: 1, reasons: [] }]), "missing")).toThrow(/not present/i);
   });
