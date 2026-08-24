@@ -8,3 +8,7 @@ work/upstream/
 !.env.example
 demo-workspace/
 evals/results/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/app/.cxx/
+apps/mobile/android/local.properties

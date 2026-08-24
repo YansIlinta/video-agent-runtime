@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+
+REQUIRED_GRADLE_VERSION="9.4.1"
+
+if ! command -v gradle >/dev/null 2>&1; then
+  echo "Gradle ${REQUIRED_GRADLE_VERSION} is required. Install that version or run through CI/Android Studio." >&2
+  exit 127
+fi
+
+ACTUAL_GRADLE_VERSION="$(gradle --version | awk '/^Gradle / { print $2; exit }')"
+if [ "$ACTUAL_GRADLE_VERSION" != "$REQUIRED_GRADLE_VERSION" ]; then
+  echo "Gradle ${REQUIRED_GRADLE_VERSION} is required; found ${ACTUAL_GRADLE_VERSION:-unknown}." >&2
+  exit 2
+fi
+
+exec gradle "$@"
