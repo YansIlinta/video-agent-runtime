@@ -4,12 +4,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { secondsToUs } from "../../core/src/index.js";
 import { createRuntime } from "../../runtime/src/index.js";
+import { projectMcpProfile, shouldExposeProjectTool } from "./tool-profile.js";
 
 const core = createRuntime();
 const server = new McpServer({ name: "video-agent-runtime", version: "0.4.0" }, { capabilities: { logging: {} } });
 const outputSchema = z.object({ result: z.unknown() });
+const mcpProfile = projectMcpProfile();
 
 function register<T extends z.ZodRawShape>(name: string, description: string, inputSchema: z.ZodObject<T>, handler: (input: z.infer<z.ZodObject<T>>) => Promise<unknown>) {
+  if (!shouldExposeProjectTool(name, mcpProfile)) return;
   server.registerTool(name, { description, inputSchema, outputSchema }, async (input) => {
     try {
       const result = await handler(input as z.infer<z.ZodObject<T>>);
@@ -85,7 +88,7 @@ register("narration_add", "Alias for timeline-aware narration generation through
 register("audio_add_narration", "Generate a TTS asset, add an editable narration clip and captions, and explicitly enable ducking.", z.object({ projectId: z.string(), text: z.string().min(1), voiceId: z.string(), language: z.string(), timelineInSeconds: z.number().nonnegative(), targetDurationSeconds: z.number().positive().optional(), actionOnOverflow: z.enum(["extend", "fail"]).optional() }), async ({ projectId, text, voiceId, language, timelineInSeconds, targetDurationSeconds, actionOnOverflow }) => core.addNarration(projectId, { text, voiceId, language, timelineInUs: secondsToUs(timelineInSeconds), ...(targetDurationSeconds ? { targetDurationUs: secondsToUs(targetDurationSeconds) } : {}), ...(actionOnOverflow ? { actionOnOverflow } : {}) }));
 register("final_approve", "Record explicit final approval of the active version.", projectInput, async ({ projectId }) => core.approveFinal(projectId));
 register("export_video", "Render the active version at final quality only after explicit final approval.", projectInput, async ({ projectId }) => core.exportVideo(projectId));
-register("system_status", "Check FFmpeg and configured planner, ASR, alignment, diarization, voice/TTS, and visual providers.", z.object({}), async () => core.systemStatus());
+register("system_status", "Check FFmpeg and configured planner, ASR, alignment, diarization, voice/TTS, and visual providers.", z.object({}), async () => ({ ...(await core.systemStatus()), mcpProfile }));
 register("job_status", "Read one durable long-running job.", z.object({ projectId: z.string(), jobId: z.string() }), async ({ projectId, jobId }) => core.jobStatus(projectId, jobId));
 register("job_list", "List durable jobs for a project.", projectInput, async ({ projectId }) => core.listJobs(projectId));
 register("job_cancel", "Request cancellation and propagate it to the active provider or child process.", z.object({ projectId: z.string(), jobId: z.string() }), async ({ projectId, jobId }) => core.cancelJob(projectId, jobId));

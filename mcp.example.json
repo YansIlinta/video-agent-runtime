@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["/absolute/path/to/video-agent-runtime/dist/packages/mcp/src/server.js"],
       "env": {
-        "VIDEO_AGENT_WORKSPACE": "/absolute/path/to/video-projects"
+        "VIDEO_AGENT_WORKSPACE": "/absolute/path/to/video-projects",
+        "VIDEO_AGENT_MCP_PROFILE": "core"
       }
     }
   }
