@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -56,6 +56,12 @@ async function exists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 export function assertContained(root: string, candidate: string): string {
@@ -388,7 +394,7 @@ export class ProjectStore {
     const relativePath = `assets/${randomUUID()}-${safeName}`;
     const destination = this.file(projectId, relativePath);
     await copyFile(source, destination, constants.COPYFILE_EXCL);
-    const sha256 = createHash("sha256").update(await readFile(destination)).digest("hex");
+    const sha256 = await sha256File(destination);
     return { relativePath, sha256, sizeBytes: sourceStat.size };
   }
 
