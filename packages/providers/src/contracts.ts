@@ -13,6 +13,23 @@ export interface AlignmentProvider { readonly id: string; readonly model: string
 export interface DiarizationProvider { readonly id: string; readonly model: string; diarize(inputPath: string, context?: OperationContext): Promise<DiarizationResult>; health?(): Promise<ProviderHealth> }
 export interface VisualEvidenceProvider { readonly id: string; inspect(input: { projectId: string; assetId: string; inputPath: string; outputDirectory: string; range: { startUs: number; endUs: number } }, context?: OperationContext): Promise<VisualEvidence>; health?(): Promise<ProviderHealth> }
 
+export interface VoiceReferenceRangeAcousticMetrics {
+  startUs: number;
+  endUs: number;
+  snrDb: number;
+  clippingRatio: number;
+  silenceRatio: number;
+  reverbScore: number;
+  rmsDbfs: number;
+  peakDbfs: number;
+  warnings: string[];
+}
+export interface VoiceReferenceAcousticAnalyzer {
+  readonly id: string;
+  analyzeRanges(inputPath: string, ranges: Array<{ startUs: number; endUs: number }>, context?: OperationContext): Promise<VoiceReferenceRangeAcousticMetrics[]>;
+  health?(): Promise<ProviderHealth>;
+}
+
 export interface TTSCapabilities { streaming: boolean; voiceSelection: boolean; voiceCloning: boolean; styleControl: boolean; speedControl: boolean; multilingual: boolean; timestamps: boolean; phonemeAlignment: boolean }
 export interface TTSWordTiming { text: string; startSeconds: number; endSeconds: number }
 export interface TTSResult { audio: Uint8Array; format: "wav"; durationSeconds: number; sampleRate: number; wordTimings: TTSWordTiming[]; model: string; voiceId: string; license?: { code: string; weights: string; voice: string; commercialUse: boolean; sourceUrl: string } }
