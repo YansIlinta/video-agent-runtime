@@ -30,7 +30,7 @@ export function createRuntime(options: { workspaceRoot?: string; asrProvider?: "
     : config.providers.tts === "openai"
       ? new OpenAIVoiceProvider(config.providers.ttsModel, secrets.openaiApiKey)
       : config.providers.tts === "qwen3-tts"
-        ? new Qwen3VoiceProvider(config.providers.ttsModel, "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", config.executables.python)
+        ? new Qwen3VoiceProvider(config.providers.ttsModel, "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", config.executables.python, undefined, 30 * 60_000, config.executables.ffmpeg)
         : undefined;
   const tts = config.providers.tts === "kokoro" ? new KokoroTTSProvider(config.providers.ttsModel, config.executables.python) : voice!;
   const planner = config.providers.planner === "openai" ? new OpenAILLMProvider(config.providers.plannerModel, secrets.openaiApiKey) : new FakeLLMProvider();
