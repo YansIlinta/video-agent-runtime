@@ -118,8 +118,51 @@ export async function translateAsrResult(
   };
 }
 
-function concatEscape(filePath: string) {
-  return filePath.replace(/'/gu, "'\\''");
+function filterNumber(value: number) {
+  if (!Number.isFinite(value)) throw new Error(`Invalid audio timing value ${value}`);
+  return value.toFixed(6).replace(/\.?0+$/u, "");
+}
+
+function atempoFilters(speed: number) {
+  if (!Number.isFinite(speed) || speed <= 1.001) return [];
+  const factors: number[] = [];
+  let remaining = speed;
+  while (remaining > 2.0) {
+    factors.push(2.0);
+    remaining /= 2.0;
+  }
+  if (remaining > 1.001) factors.push(remaining);
+  return factors.map((factor) => `atempo=${filterNumber(factor)}`);
+}
+
+/**
+ * Build a deterministic FFmpeg graph that places every synthesized segment back
+ * at its original ASR timestamp. Long translations are tempo-compressed to the
+ * source speech window; short translations are padded with silence instead of
+ * pulling later speech earlier on the timeline.
+ */
+export function buildDubbingFilterGraph(segments: SynthesizedSpeechSegment[]) {
+  if (segments.length === 0) throw new Error("No synthesized segments to mix");
+  const branches = segments.map((segment, inputIndex) => {
+    const sourceDuration = segment.sourceEndSeconds - segment.sourceStartSeconds;
+    if (!(sourceDuration > 0)) throw new Error(`Invalid source duration for segment ${segment.index}`);
+    if (segment.sourceStartSeconds < 0) throw new Error(`Invalid source start for segment ${segment.index}`);
+    const speed = segment.generatedDurationSeconds > sourceDuration
+      ? segment.generatedDurationSeconds / sourceDuration
+      : 1;
+    const filters = [
+      "aresample=48000",
+      "aformat=sample_fmts=fltp:channel_layouts=stereo",
+      ...atempoFilters(speed),
+      "apad",
+      `atrim=duration=${filterNumber(sourceDuration)}`,
+      "asetpts=N/SR/TB",
+      `adelay=${Math.round(segment.sourceStartSeconds * 1000)}:all=1`,
+    ];
+    return `[${inputIndex}:a]${filters.join(",")}[s${inputIndex}]`;
+  });
+  const labels = segments.map((_, index) => `[s${index}]`).join("");
+  return `${branches.join(";")};${labels}amix=inputs=${segments.length}:duration=longest:dropout_transition=0,aresample=48000:async=1:first_pts=0[outa]`;
 }
 
 export async function synthesizeTranslation(
@@ -180,15 +223,25 @@ export async function synthesizeTranslation(
   }
 
   const ffmpeg = options.ffmpeg ?? process.env.FFMPEG_PATH ?? "ffmpeg";
-  const listPath = path.join(options.outputDirectory, "concat.txt");
-  await writeFile(listPath, generated.map((segment) => `file '${concatEscape(path.resolve(segment.audioPath))}'`).join("\n") + "\n", "utf8");
+  const filterScriptPath = path.join(options.outputDirectory, "mix-filter.txt");
+  await writeFile(filterScriptPath, buildDubbingFilterGraph(generated) + "\n", "utf8");
   const dubbedAudioPath = path.join(options.outputDirectory, "dubbed.wav");
-  const concat = await runProcess(ffmpeg, [
-    "-y", "-f", "concat", "-safe", "0", "-i", listPath,
-    "-ac", "2", "-ar", "48000", dubbedAudioPath,
-  ], { timeoutMs: 30 * 60_000, maxOutputBytes: 2 * 1024 * 1024, ...(options.signal ? { signal: options.signal } : {}) });
-  if (concat.exitCode !== 0) throw new Error(`Failed to concatenate synthesized speech: ${concat.stderr.slice(-4000)}`);
-  options.onProgress?.(0.9, "tts-concat", "Built translated speech track");
+  const inputArgs = generated.flatMap((segment) => ["-i", path.basename(segment.audioPath)]);
+  const mix = await runProcess(ffmpeg, [
+    "-y",
+    ...inputArgs,
+    "-filter_complex_script", path.basename(filterScriptPath),
+    "-map", "[outa]",
+    "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le",
+    path.basename(dubbedAudioPath),
+  ], {
+    timeoutMs: 30 * 60_000,
+    maxOutputBytes: 2 * 1024 * 1024,
+    cwd: options.outputDirectory,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (mix.exitCode !== 0) throw new Error(`Failed to build translated speech timeline: ${mix.stderr.slice(-4000)}`);
+  options.onProgress?.(0.9, "tts-mix", "Built timestamp-aligned translated speech track");
 
   return {
     targetLanguage: translation.targetLanguage,

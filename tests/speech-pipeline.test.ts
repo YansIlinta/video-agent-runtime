@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ASRResult } from "../packages/providers/src/contracts.js";
-import { translateAsrResult, type StructuredTextGenerator } from "../packages/speech/src/speech-pipeline.js";
+import {
+  buildDubbingFilterGraph,
+  translateAsrResult,
+  type StructuredTextGenerator,
+  type SynthesizedSpeechSegment,
+} from "../packages/speech/src/speech-pipeline.js";
 
 const asr: ASRResult = {
   language: "Chinese",
@@ -56,5 +61,38 @@ describe("speech-only translation", () => {
       targetLanguage: "English",
       segments: [{ index: 0, targetText: "Merged translation." }],
     }), { targetLanguage: "English" })).rejects.toThrow("changed segment count");
+  });
+
+  it("places synthesized speech on the original ASR timeline", () => {
+    const segments: SynthesizedSpeechSegment[] = [
+      {
+        index: 0,
+        sourceStartSeconds: 0.5,
+        sourceEndSeconds: 1.5,
+        sourceText: "你好。",
+        targetText: "Hello there.",
+        audioPath: "/tmp/segment-0000.wav",
+        generatedDurationSeconds: 2,
+      },
+      {
+        index: 1,
+        sourceStartSeconds: 2,
+        sourceEndSeconds: 3.5,
+        sourceText: "这是一个测试。",
+        targetText: "This is a test.",
+        audioPath: "/tmp/segment-0001.wav",
+        generatedDurationSeconds: 1,
+      },
+    ];
+
+    const graph = buildDubbingFilterGraph(segments);
+
+    expect(graph).toContain("[0:a]");
+    expect(graph).toContain("atempo=2");
+    expect(graph).toContain("atrim=duration=1");
+    expect(graph).toContain("adelay=500:all=1");
+    expect(graph).toContain("atrim=duration=1.5");
+    expect(graph).toContain("adelay=2000:all=1");
+    expect(graph).toContain("amix=inputs=2:duration=longest");
   });
 });

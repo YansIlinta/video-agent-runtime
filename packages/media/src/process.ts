@@ -6,12 +6,17 @@ export interface ProcessResult {
   exitCode: number;
 }
 
-export function runProcess(command: string, args: string[], options: { timeoutMs?: number; maxOutputBytes?: number; signal?: AbortSignal; onStderr?: (text: string) => void } = {}): Promise<ProcessResult> {
+export function runProcess(command: string, args: string[], options: { timeoutMs?: number; maxOutputBytes?: number; signal?: AbortSignal; onStderr?: (text: string) => void; cwd?: string } = {}): Promise<ProcessResult> {
   if (options.signal?.aborted) return Promise.reject(options.signal.reason instanceof Error ? options.signal.reason : new Error(`${command} cancelled`));
   const timeoutMs = options.timeoutMs ?? 30 * 60_000;
   const maxOutputBytes = options.maxOutputBytes ?? 10 * 1024 * 1024;
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;
