@@ -263,7 +263,7 @@ register("video_translate", "End-to-end language replacement proof: video/audio 
     segmentCount: dubbed.segments.length,
     warnings: [
       ...result.warnings,
-      ...dubbed.timingWarnings,
+      ...(dubbed.timingWarnings ?? []),
       "Translated audio preserves source speech slots and pauses, but remains single-track dubbing rather than phoneme/lip synchronization.",
     ],
   };
