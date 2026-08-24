@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -50,14 +50,13 @@ export interface SynthesizedSpeechSegment {
   sourceText: string;
   targetText: string;
   audioPath: string;
-  generatedAudioPath: string;
   generatedDurationSeconds: number;
-  targetDurationSeconds: number;
-  gapBeforeSeconds: number;
-  playbackRate: number;
-  renderedStartSeconds: number;
-  renderedEndSeconds: number;
-  delayedBySeconds: number;
+  targetDurationSeconds?: number;
+  gapBeforeSeconds?: number;
+  playbackRate?: number;
+  renderedStartSeconds?: number;
+  renderedEndSeconds?: number;
+  delayedBySeconds?: number;
 }
 
 export interface SpeechSynthesisManifest {
@@ -67,7 +66,7 @@ export interface SpeechSynthesisManifest {
   voiceId: string;
   segments: SynthesizedSpeechSegment[];
   dubbedAudioPath: string;
-  timingWarnings: string[];
+  timingWarnings?: string[];
 }
 
 export interface VideoDubResult extends SpeechSynthesisManifest {
@@ -284,6 +283,7 @@ export async function synthesizeTranslation(
       `Aligning segment ${index + 1}/${translation.segments.length} to source timing`,
     );
     await fitSegmentToSourceTiming(ffmpeg, generatedAudioPath, audioPath, timing, options.signal);
+    await unlink(generatedAudioPath).catch(() => undefined);
     renderedCursorSeconds = timing.renderedEndSeconds;
 
     generated.push({
@@ -293,7 +293,6 @@ export async function synthesizeTranslation(
       sourceText: sourceSegment.text,
       targetText: translated.targetText,
       audioPath,
-      generatedAudioPath,
       generatedDurationSeconds,
       targetDurationSeconds: timing.targetDurationSeconds,
       gapBeforeSeconds: timing.gapBeforeSeconds,
