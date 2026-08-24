@@ -70,30 +70,31 @@ import Foundation
     lock.lock(); starting.insert(requestId); lock.unlock()
 
     DispatchQueue.global(qos: .utility).async { [weak self] in
-      guard let self else { completion(nil, NSError(domain: "VideoAgentSpeechHost", code: 1)); return }
+      guard let strongSelf = self else { completion(nil, NSError(domain: "VideoAgentSpeechHost", code: 1, userInfo: [NSLocalizedDescriptionKey: "Speech host was released"])); return }
       do {
-        try self.ensureActive(requestId)
-        guard let uri = value["uri"] as? String, let apiKey = value["apiKey"] as? String, let model = value["model"] as? String else { throw self.hostError("INVALID_INPUT", "Malformed speech request") }
-        guard model == "gpt-4o-transcribe-diarize" || model == "whisper-1" else { throw self.hostError("INVALID_INPUT", "Unsupported ASR model") }
-        guard !apiKey.isEmpty else { throw self.hostError("AUTH_REQUIRED", "API key required") }
-        let source = try self.resolveProject(uri); let boundary = "video-agent-\(UUID().uuidString)"
-        let body = try self.makeMultipartBody(requestId: requestId, source: source, model: model, language: value["language"] as? String, prompt: model == "whisper-1" ? value["prompt"] as? String : nil, boundary: boundary)
-        try self.ensureActive(requestId)
+        try strongSelf.ensureActive(requestId)
+        guard let uri = value["uri"] as? String, let apiKey = value["apiKey"] as? String, let model = value["model"] as? String else { throw strongSelf.hostError("INVALID_INPUT", "Malformed speech request") }
+        guard model == "gpt-4o-transcribe-diarize" || model == "whisper-1" else { throw strongSelf.hostError("INVALID_INPUT", "Unsupported ASR model") }
+        guard !apiKey.isEmpty else { throw strongSelf.hostError("AUTH_REQUIRED", "API key required") }
+        let source = try strongSelf.resolveProject(uri); let boundary = "video-agent-\(UUID().uuidString)"
+        let body = try strongSelf.makeMultipartBody(requestId: requestId, source: source, model: model, language: value["language"] as? String, prompt: model == "whisper-1" ? value["prompt"] as? String : nil, boundary: boundary)
+        try strongSelf.ensureActive(requestId)
         var request = URLRequest(url: Self.endpoint); request.httpMethod = "POST"; request.timeoutInterval = ((value["timeoutMs"] as? NSNumber)?.doubleValue ?? 1_800_000) / 1000
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization"); request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let task = URLSession.shared.uploadTask(with: request, fromFile: body) { [weak self] data, response, error in
-          defer { self?.cleanup(requestId) }
+        let task = URLSession.shared.uploadTask(with: request, fromFile: body) { [weak strongSelf] data, response, error in
+          guard let host = strongSelf else { completion(nil, NSError(domain: "VideoAgentSpeechHost", code: 1, userInfo: [NSLocalizedDescriptionKey: "Speech host was released"])); return }
+          defer { host.cleanup(requestId) }
           if let error { completion(nil, error as NSError); return }
-          guard let self, let http = response as? HTTPURLResponse else { completion(nil, self?.hostError("NETWORK_UNAVAILABLE", "Missing HTTP response")); return }
-          let data = data ?? Data(); if data.count > Self.responseLimit { completion(nil, self.hostError("PROVIDER_ERROR", "Transcription response exceeded \(Self.responseLimit) bytes")); return }
-          let text = String(data: data, encoding: .utf8) ?? ""
-          if !(200...299).contains(http.statusCode) { completion(nil, self.hostError("PROVIDER_ERROR", "OpenAI transcription failed (\(http.statusCode)): \(text.prefix(1000))")); return }
+          guard let http = response as? HTTPURLResponse else { completion(nil, host.hostError("NETWORK_UNAVAILABLE", "Missing HTTP response")); return }
+          let responseData = data ?? Data(); if responseData.count > Self.responseLimit { completion(nil, host.hostError("PROVIDER_ERROR", "Transcription response exceeded \(Self.responseLimit) bytes")); return }
+          let text = String(data: responseData, encoding: .utf8) ?? ""
+          if !(200...299).contains(http.statusCode) { completion(nil, host.hostError("PROVIDER_ERROR", "OpenAI transcription failed (\(http.statusCode)): \(text.prefix(1000))")); return }
           completion(text, nil)
         }
-        self.lock.lock(); self.starting.remove(requestId); let cancelledBeforeStart = self.cancelled.contains(requestId); if !cancelledBeforeStart { self.temporaryBodies[requestId] = body; self.active[requestId] = task }; self.lock.unlock()
-        if cancelledBeforeStart { try? self.fm.removeItem(at: body); self.cleanup(requestId); completion(nil, self.hostError("CANCELLED", "Transcription cancelled")); return }
+        strongSelf.lock.lock(); strongSelf.starting.remove(requestId); let cancelledBeforeStart = strongSelf.cancelled.contains(requestId); if !cancelledBeforeStart { strongSelf.temporaryBodies[requestId] = body; strongSelf.active[requestId] = task }; strongSelf.lock.unlock()
+        if cancelledBeforeStart { try? strongSelf.fm.removeItem(at: body); strongSelf.cleanup(requestId); completion(nil, strongSelf.hostError("CANCELLED", "Transcription cancelled")); return }
         task.resume()
-      } catch { self.cleanup(requestId); completion(nil, error as NSError) }
+      } catch { strongSelf.cleanup(requestId); completion(nil, error as NSError) }
     }
   }
 
