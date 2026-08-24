@@ -22,6 +22,8 @@ class NativeSpeechHostModule(private val context: ReactApplicationContext) : Nat
   }
 
   private val active = ConcurrentHashMap<String, HttpURLConnection>()
+  private val starting = ConcurrentHashMap.newKeySet<String>()
+  private val cancelled = ConcurrentHashMap.newKeySet<String>()
   override fun getName() = NAME
 
   private fun resolveProject(uri: String): File {
@@ -36,26 +38,17 @@ class NativeSpeechHostModule(private val context: ReactApplicationContext) : Nat
   }
 
   private fun mime(file: File) = when (file.extension.lowercase()) {
-    "flac" -> "audio/flac"
-    "mp3", "mpeg", "mpga" -> "audio/mpeg"
-    "mp4" -> "video/mp4"
-    "m4a" -> "audio/mp4"
-    "ogg" -> "audio/ogg"
-    "wav" -> "audio/wav"
-    "webm" -> "audio/webm"
-    else -> "application/octet-stream"
+    "flac" -> "audio/flac"; "mp3", "mpeg", "mpga" -> "audio/mpeg"; "mp4" -> "video/mp4"; "m4a" -> "audio/mp4"; "ogg" -> "audio/ogg"; "wav" -> "audio/wav"; "webm" -> "audio/webm"; else -> "application/octet-stream"
   }
 
-  private fun readLimited(input: InputStream?): String {
+  private fun ensureActive(requestId: String) { if (cancelled.contains(requestId)) error("CANCELLED: transcription cancelled") }
+
+  private fun readLimited(input: InputStream?, requestId: String): String {
     if (input == null) return ""
     input.use { stream ->
-      val output = ByteArrayOutputStream()
-      val buffer = ByteArray(32 * 1024)
-      var total = 0
+      val output = ByteArrayOutputStream(); val buffer = ByteArray(32 * 1024); var total = 0
       while (true) {
-        val count = stream.read(buffer)
-        if (count < 0) break
-        total += count
+        ensureActive(requestId); val count = stream.read(buffer); if (count < 0) break; total += count
         if (total > RESPONSE_LIMIT) error("PROVIDER_ERROR: transcription response exceeded $RESPONSE_LIMIT bytes")
         output.write(buffer, 0, count)
       }
@@ -64,64 +57,51 @@ class NativeSpeechHostModule(private val context: ReactApplicationContext) : Nat
   }
 
   private fun transcribe(value: JSONObject): String {
-    val requestId = value.getString("requestId")
+    val requestId = value.getString("requestId"); ensureActive(requestId)
     val model = value.getString("model")
     require(model == "gpt-4o-transcribe-diarize" || model == "whisper-1") { "INVALID_INPUT: unsupported ASR model" }
-    val apiKey = value.getString("apiKey")
-    require(apiKey.isNotBlank()) { "AUTH_REQUIRED: API key required" }
-    val file = resolveProject(value.getString("uri"))
+    val apiKey = value.getString("apiKey"); require(apiKey.isNotBlank()) { "AUTH_REQUIRED: API key required" }
+    val file = resolveProject(value.getString("uri")); ensureActive(requestId)
     val boundary = "video-agent-${UUID.randomUUID()}"
     val connection = URL(OPENAI_TRANSCRIPTIONS).openConnection() as HttpURLConnection
-    connection.requestMethod = "POST"
-    connection.connectTimeout = value.optInt("timeoutMs", 30 * 60 * 1000)
-    connection.readTimeout = connection.connectTimeout
-    connection.doOutput = true
-    connection.setChunkedStreamingMode(64 * 1024)
-    connection.setRequestProperty("Authorization", "Bearer $apiKey")
-    connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-    active[requestId] = connection
+    connection.requestMethod = "POST"; connection.connectTimeout = value.optInt("timeoutMs", 30 * 60 * 1000); connection.readTimeout = connection.connectTimeout; connection.doOutput = true
+    connection.setChunkedStreamingMode(64 * 1024); connection.setRequestProperty("Authorization", "Bearer $apiKey"); connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+    active[requestId] = connection; ensureActive(requestId)
 
     fun writeText(output: java.io.OutputStream, text: String) = output.write(text.toByteArray(Charsets.UTF_8))
-    fun field(output: java.io.OutputStream, name: String, fieldValue: String) {
-      writeText(output, "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$fieldValue\r\n")
-    }
+    fun field(output: java.io.OutputStream, name: String, fieldValue: String) { writeText(output, "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$fieldValue\r\n") }
 
     try {
       connection.outputStream.use { output ->
-        field(output, "model", model)
-        value.optString("language").takeIf { it.isNotBlank() }?.let { field(output, "language", it) }
-        if (model == "gpt-4o-transcribe-diarize") {
-          field(output, "response_format", "diarized_json")
-          field(output, "chunking_strategy", "auto")
-        } else {
-          field(output, "response_format", "verbose_json")
-          field(output, "timestamp_granularities[]", "segment")
-          field(output, "timestamp_granularities[]", "word")
-          value.optString("prompt").takeIf { it.isNotBlank() }?.let { field(output, "prompt", it) }
-        }
+        field(output, "model", model); value.optString("language").takeIf { it.isNotBlank() }?.let { field(output, "language", it) }
+        if (model == "gpt-4o-transcribe-diarize") { field(output, "response_format", "diarized_json"); field(output, "chunking_strategy", "auto") }
+        else { field(output, "response_format", "verbose_json"); field(output, "timestamp_granularities[]", "segment"); field(output, "timestamp_granularities[]", "word"); value.optString("prompt").takeIf { it.isNotBlank() }?.let { field(output, "prompt", it) } }
         writeText(output, "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${file.name.replace("\"", "")}\"\r\nContent-Type: ${mime(file)}\r\n\r\n")
-        file.inputStream().buffered(64 * 1024).use { input -> input.copyTo(output, 64 * 1024) }
-        writeText(output, "\r\n--$boundary--\r\n")
+        file.inputStream().buffered(64 * 1024).use { input ->
+          val buffer = ByteArray(64 * 1024)
+          while (true) { ensureActive(requestId); val count = input.read(buffer); if (count < 0) break; output.write(buffer, 0, count) }
+        }
+        ensureActive(requestId); writeText(output, "\r\n--$boundary--\r\n")
       }
-      val status = connection.responseCode
-      val body = readLimited(if (status >= 400) connection.errorStream else connection.inputStream)
+      ensureActive(requestId); val status = connection.responseCode; val body = readLimited(if (status >= 400) connection.errorStream else connection.inputStream, requestId)
       if (status !in 200..299) error("PROVIDER_ERROR: OpenAI transcription failed ($status): ${body.take(1000)}")
       return body
-    } finally {
-      active.remove(requestId)
-      connection.disconnect()
-    }
+    } finally { active.remove(requestId); connection.disconnect() }
   }
 
   override fun transcribeOpenAI(requestJson: String, promise: Promise) {
+    val value = try { JSONObject(requestJson) } catch (error: Throwable) { promise.reject("INVALID_INPUT", error.message, error); return }
+    val requestId = try { value.getString("requestId") } catch (error: Throwable) { promise.reject("INVALID_INPUT", "requestId required", error); return }
+    starting.add(requestId)
     Thread {
-      try { promise.resolve(transcribe(JSONObject(requestJson))) }
+      try { ensureActive(requestId); promise.resolve(transcribe(value)) }
       catch (error: Throwable) { promise.reject("SPEECH_PROVIDER", error.message, error) }
+      finally { starting.remove(requestId); cancelled.remove(requestId); active.remove(requestId)?.disconnect() }
     }.start()
   }
 
   override fun cancelTranscription(requestId: String, promise: Promise) {
-    active.remove(requestId)?.disconnect()
-    promise.resolve(null)
+    if (starting.contains(requestId) || active.containsKey(requestId)) cancelled.add(requestId)
+    active.remove(requestId)?.disconnect(); promise.resolve(null)
   }
 }
