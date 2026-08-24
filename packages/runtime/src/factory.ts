@@ -2,17 +2,22 @@ import { ProjectStore } from "../../core/src/index.js";
 import { FFmpegRenderer, selfCheckPreview } from "../../render/src/index.js";
 import { FFmpegVisualEvidenceProvider, probeMedia } from "../../media/src/index.js";
 import { createNodeHostProfile } from "../../platform/src/index.js";
-import { FakeASRProvider, FakeLLMProvider, FakeVoiceProvider, OpenAILLMProvider, OpenAIVoiceProvider } from "../../providers/src/index.js";
+import { FakeASRProvider, FakeLLMProvider, FakeVoiceProvider, OpenAIASRProvider, OpenAILLMProvider, OpenAIVoiceProvider, type OpenAIASRModel } from "../../providers/src/index.js";
 import { FasterWhisperASRProvider, KokoroTTSProvider, WhisperXProvider } from "../../speech/src/index.js";
 import { VideoAgentCore } from "./video-agent-core.js";
 import { loadRuntimeConfig, loadRuntimeSecrets, type RuntimeConfig } from "./config.js";
 import { StructuredLogger } from "./logger.js";
 
-export function createRuntime(options: { workspaceRoot?: string; asrProvider?: "fake" | "faster-whisper"; ttsProvider?: "fake" | "kokoro" | "openai"; plannerProvider?: "fake" | "openai"; config?: RuntimeConfig } = {}): VideoAgentCore {
+function createOpenAIASR(model: string, apiKey?: string) {
+  if (model !== "gpt-4o-transcribe-diarize" && model !== "whisper-1") throw new Error(`Unsupported edit-safe OpenAI ASR model ${model}; use gpt-4o-transcribe-diarize for speaker segments or whisper-1 for word timestamps`);
+  return new OpenAIASRProvider(model as OpenAIASRModel, apiKey);
+}
+
+export function createRuntime(options: { workspaceRoot?: string; asrProvider?: "fake" | "faster-whisper" | "openai"; ttsProvider?: "fake" | "kokoro" | "openai"; plannerProvider?: "fake" | "openai"; config?: RuntimeConfig } = {}): VideoAgentCore {
   const loaded = options.config ?? loadRuntimeConfig();
   const secrets = loadRuntimeSecrets();
   const config: RuntimeConfig = { ...loaded, ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}), providers: { ...loaded.providers, ...(options.asrProvider ? { asr: options.asrProvider } : {}), ...(options.ttsProvider ? { tts: options.ttsProvider } : {}), ...(options.plannerProvider ? { planner: options.plannerProvider } : {}) } };
-  const asr = config.providers.asr === "faster-whisper" ? new FasterWhisperASRProvider(config.providers.asrModel, config.executables.python) : new FakeASRProvider();
+  const asr = config.providers.asr === "faster-whisper" ? new FasterWhisperASRProvider(config.providers.asrModel, config.executables.python) : config.providers.asr === "openai" ? createOpenAIASR(config.providers.asrModel, secrets.openaiApiKey) : new FakeASRProvider();
   const voice = config.providers.tts === "fake" ? new FakeVoiceProvider() : config.providers.tts === "openai" ? new OpenAIVoiceProvider(config.providers.ttsModel, secrets.openaiApiKey) : undefined;
   const tts = config.providers.tts === "kokoro" ? new KokoroTTSProvider(config.providers.ttsModel, config.executables.python) : voice!;
   const planner = config.providers.planner === "openai" ? new OpenAILLMProvider(config.providers.plannerModel, secrets.openaiApiKey) : new FakeLLMProvider();
