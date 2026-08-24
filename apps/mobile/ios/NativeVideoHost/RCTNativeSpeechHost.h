@@ -1,5 +1,5 @@
 #import <Foundation/Foundation.h>
-#import "NativeSpeechHostSpec.h"
+#import "NativeVideoHostSpec.h"
 
 NS_ASSUME_NONNULL_BEGIN
 @interface RCTNativeSpeechHost : NSObject <NativeSpeechHostSpec>
