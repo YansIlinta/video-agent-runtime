@@ -122,7 +122,7 @@ export class MutableASRProvider implements ASRProvider {
   configured() { return this.current !== undefined; }
   private provider() { if (!this.current) throw new Error("On-device transcription is not implemented on this host. Configure an ASR provider before proposing an edit."); return this.current; }
   capabilities(): ASRCapabilities { return this.current?.capabilities() ?? { wordTimestamps: false, segmentTimestamps: false, speakerDiarization: false, languageDetection: false, streaming: false, confidence: false, forcedAlignment: false }; }
-  transcribe(inputPath: string, options?: { language?: string; prompt?: string }, context?: OperationContext) { return this.provider().transcribe(inputPath, options, context); }
+  async transcribe(inputPath: string, options?: { language?: string; prompt?: string }, context?: OperationContext) { return this.provider().transcribe(inputPath, options, context); }
   health() { return this.current?.health?.() ?? Promise.resolve({ id: this.id, status: "unavailable" as const, message: "ASR provider is not configured", capabilities: { ...this.capabilities() } }); }
 }
 
