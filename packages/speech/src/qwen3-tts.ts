@@ -44,9 +44,27 @@ export class Qwen3VoiceProvider implements VoiceProvider {
   ) { this.voiceRoot = voiceRoot; }
 
   capabilities() { return { streaming: false, voiceSelection: true, voiceCloning: true, styleControl: false, speedControl: false, multilingual: true, timestamps: false, phonemeAlignment: false }; }
-  voiceCapabilities() { return { tts: true, presetVoices: false, voiceDesign: true, zeroShotClone: true, persistentVoiceProfile: true, crossLingualClone: true, voiceConversion: false, streaming: false, wordTimestamps: false, emotionControl: true, styleControl: true, remoteDeletion: false }; }
+  voiceCapabilities() {
+    return {
+      tts: true,
+      presetVoices: false,
+      voiceDesign: true,
+      zeroShotClone: true,
+      persistentVoiceProfile: true,
+      crossLingualClone: true,
+      voiceConversion: false,
+      streaming: false,
+      wordTimestamps: false,
+      // VoiceDesign accepts rich instructions, but the current clone-synthesis adapter has no
+      // per-generation emotion/style parameter. Do not advertise capabilities the adapter cannot execute.
+      emotionControl: false,
+      styleControl: false,
+      remoteDeletion: false,
+    };
+  }
   async listVoices(): Promise<VoiceProfile[]> { return []; }
 
+  private async ensureRoot() { await mkdir(this.voiceRoot, { recursive: true }); }
   private dir(voiceId: string) { return path.join(this.voiceRoot, safeVoiceId(voiceId)); }
   private manifestPath(voiceId: string) { return path.join(this.dir(voiceId), "voice.json"); }
   private async readManifest(voiceId: string): Promise<StoredVoiceManifest> { return JSON.parse(await readFile(this.manifestPath(voiceId), "utf8")) as StoredVoiceManifest; }
@@ -69,6 +87,7 @@ export class Qwen3VoiceProvider implements VoiceProvider {
 
   async enrollVoice(input: VoiceEnrollmentInput, context?: OperationContext) {
     if (!input.authorization.evidence.trim() || !input.authorization.grantedBy.trim()) throw new Error("Qwen3 voice enrollment requires explicit authorization evidence");
+    await this.ensureRoot();
     const voiceId = `qwen3-${randomUUID()}`; const directory = this.dir(voiceId); const referenceAudio = path.join(directory, "reference.wav");
     await mkdir(directory, { recursive: false });
     try {
@@ -105,7 +124,8 @@ export class Qwen3VoiceProvider implements VoiceProvider {
   }
 
   async designVoice(input: VoiceDesignRequest, context?: OperationContext) {
-    const sampleText = this.validateText(input.sampleText); const voiceId = `qwen3-${randomUUID()}`; const directory = this.dir(voiceId); const referenceAudio = path.join(directory, "reference.wav"); await mkdir(directory, { recursive: false });
+    const sampleText = this.validateText(input.sampleText); await this.ensureRoot();
+    const voiceId = `qwen3-${randomUUID()}`; const directory = this.dir(voiceId); const referenceAudio = path.join(directory, "reference.wav"); await mkdir(directory, { recursive: false });
     const instruction = [input.description, input.tone && `tone: ${input.tone}`, input.pace && `pace: ${input.pace}`, input.agePresentation && `age: ${input.agePresentation}`, input.energy && `energy: ${input.energy}`, input.style && `style: ${input.style}`].filter(Boolean).join("; ");
     try {
       const args = [this.script(), "--mode", "design", "--model", this.designModel, "--text", sampleText, "--language", qwenLanguage(input.language), "--instruct", instruction, "--output", referenceAudio];
