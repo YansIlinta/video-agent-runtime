@@ -1,0 +1,88 @@
+# Video Agent Runtime V1 report
+
+> Updated through V1.5 productionization (runtime version 0.1.5).
+
+## V1.5 productionization result
+
+### Architecture preserved
+
+V1 ProjectStore, Workflow, Transcript, EditingStrategy, EditPlan, Timeline, Version, CLI/MCP adapters and FFmpeg renderer remain authoritative. V1.5 extends them with EditPatch, Job/Event, ProviderCall, alignment/diarization results and VisualEvidence. No parallel editing engine or replacement domain model was introduced.
+
+### Real LLM provider
+
+`OpenAILLMProvider` implements vendor-neutral `generateStructured<T>` and the existing Strategy/Edit planning methods plus Patch planning. It uses the OpenAI Responses API JSON Schema format, local JSON parsing and Zod validation, targeted repair retries, bounded transient retries, AbortSignal cancellation, health checks and persisted provider/model/request/latency/token/retry/validation metadata. Secrets remain environment-only. Fake remains the default, and hosted eval is credential-gated.
+
+### ASR, alignment and diarization
+
+faster-whisper now supports AbortSignal, progress phases, runtime health, raw-result preservation, language confidence and cache reuse before Workflow transition. WhisperX alignment and diarization are separate optional provider operations. Deterministic fusion maps tokens and speaker intervals into canonical Transcript data, marks `asr`/`aligned`/`estimated` timing provenance and retains raw evidence. Missing models/tokens fall back to ASR timestamps and explicit quality warnings. The local Python environment did not contain these model runtimes, so their actual inference latency is not claimed.
+
+### Visual evidence
+
+On-demand FFmpeg inspection detects shot boundaries and extracts three representative keyframes for a requested range. OCR and face observations have canonical fields but remain empty unless a future optional analyzer is installed. The E2E demo exercised the evidence path successfully.
+
+### Minimal PatchPlan
+
+EditPatch declares affected ranges, segment IDs and track IDs, reason and typed operations. Validation rejects stale versions, unknown/out-of-scope targets, invalid simulated EditPlans and unexpectedly global patches without justification. Patch diff and apply are separate; apply is lock-protected, creates a new plan and immutable version, records patch provenance and can finish a commit already written before a crash.
+
+### Worker, cancellation, retry and quotas
+
+The durable local FIFO queue persists Job and JobEvent JSON, enforces global/type concurrency and per-project serialization, prevents duplicate idempotency keys, recovers interrupted running jobs, and exposes monotonic progress. Cancellation reaches OpenAI fetch, faster-whisper/WhisperX/Kokoro sidecars and FFmpeg through AbortSignal. Subprocesses receive graceful termination followed by forced termination. Only transient errors retry with bounded exponential backoff and jitter; invalid input, resource exhaustion, cancellation, provider and permanent failures are retained without indiscriminate retry.
+
+Configuration defines maximum upload/input/preview/project disk/retained preview limits and global/FFmpeg/ASR/GPU job concurrency. Failed imports remove only the newly copied asset. Render temporary files and captions are cleaned after success/failure/cancellation and swept at startup.
+
+### Recovery and concurrency
+
+Atomic reads tolerate the brief replace window and backup recovery. The queue has a single scheduler pump, explicit lifecycle shutdown, single job claiming, restart recovery and terminal event persistence. EditPlan/Patch/restore application detects a previously written next version and completes the interrupted commit rather than applying it twice. Project locks still serialize conflicting timeline mutations.
+
+### MCP and CLI additions
+
+The MCP surface now has 44 tools, adding system status, job status/list/cancel, PatchPlan plan/validate/diff/apply, transcript quality/enrichment and visual range inspection. CLI adds `doctor`, `jobs`, `cancel`, `patch`, `align`, `visual`, and `eval`. Both still call the same VideoAgentCore.
+
+### Evaluation, fixtures and benchmarks
+
+`evals/fixtures/corpus.json` covers single-speaker interview, two-person interview, podcast, lecture and screen recording with semantic expectations rather than exact plan equality. Three small real-speech video fixtures are derived from MIT-licensed faster-whisper test audio for one speaker, stereo diarization/overlap and background-music/proper-noun paths. Fake evaluation achieved 100% schema validity/duration/protected-content/duplicate constraints/semantic coverage, while honest strategy and hook proxies are 60%. Repeated queue measurements ranged from 22.7–66.3 jobs/s for 50 local no-op persisted jobs. Detailed limitations and render timings are in `docs/v1.5-benchmarks.md`.
+
+### Verification
+
+- Typecheck and build pass.
+- 23 tests in 9 files pass, including OpenAI malformed/schema-invalid retries, patch scope, fusion, ASR cache, queue retry/restart/cancel, quota, doctor and FFmpeg cancellation.
+- MCP smoke discovers 44 tools and calls `project_create` and `system_status` with structured output.
+- Real FFmpeg E2E completes visual inspection, initial edit, preview, range feedback, PATCH diagnosis, local patch/diff/apply, second preview, narration/ducking, third preview, explicit approval and final H.264/AAC export.
+
+### Remaining V2/credential-gated work
+
+- Run and tune OpenAI golden eval with a user-provided key; no key was present in this environment.
+- Install and benchmark faster-whisper, WhisperX and Kokoro models on the target CPU/GPU; none was installed here.
+- Add optional real OCR/face/speaker-visibility analyzers and evidence summaries.
+- Add journaled multi-file transactions beyond idempotent apply recovery, stronger stale-lock PID recovery, network auth/API, multi-tenant isolation and resource accounting.
+- Measure peak memory/CPU/GPU on known production hardware.
+
+## Delivered
+
+- A runnable TypeScript/Node headless runtime with CLI and stdio MCP surfaces.
+- Durable Project, Asset, Transcript, EditingStrategy, EditPlan, Timeline, Feedback, Diagnosis, Workflow, SpeechAsset, VoiceProfile, Version, and Diff schemas.
+- Integer-microsecond timebase, transactional project persistence, recovery, locks, structured diffs, and version restore.
+- Transcript-first editing, strategy approval, plan validation/diff/apply, proxy preview, structured feedback diagnosis, narration/TTS, ducking, final approval, and FFmpeg export.
+- Optional faster-whisper and Kokoro Python sidecars plus deterministic providers for offline development and tests.
+- A focused editing skill, security policy, upstream/license study, tests, MCP smoke test, and actual FFmpeg end-to-end demo.
+
+## Verification
+
+- `npm run typecheck`
+- `npm run build`
+- `npm test`: 12 tests across 4 files
+- `npm run demo`: two previews and a final 1080x1920 H.264/AAC export; duration/self-check passed
+- `npx tsx scripts/mcp-smoke.ts`: tool discovery plus structured `project_create`
+- Visual frame inspection confirmed narration captions replace overlapping source captions.
+
+## V1 boundaries
+
+The default planner, ASR, and TTS are deterministic local doubles. FFmpeg rendering is real. Faster-whisper and Kokoro become real when their optional Python dependencies and model files are installed. WhisperX was studied but its alignment/diarization adapter is a next step. Hosted OpenAI/Anthropic/Gemini/Grok planner adapters, shot/OCR/face analysis, automatic patch-plan generation, voice cloning, and a mobile UI are intentionally outside this executable V1.
+
+## Suggested next milestones
+
+1. Add one production LLM structured-output adapter and golden-plan evaluation corpus.
+2. Add WhisperX alignment/diarization and real interview fixtures.
+3. Add shot/OCR/face metadata as optional evidence, not as the primary editing interface.
+4. Add queued workers, cancellation, progress events, and resource quotas.
+5. Build a review-first mobile client consuming a network wrapper around the same domain API.

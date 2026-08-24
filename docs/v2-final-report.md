@@ -1,0 +1,56 @@
+# V2 Voice Identity Infrastructure report
+
+## Outcome and preserved invariants
+
+V2 extends the working V1/V1.5 runtime. ProjectStore, VideoAgentCore, Workflow, Transcript, EditingStrategy, EditPlan/EditPatch, Timeline, Version, Job/Event, ProviderCall, CLI/MCP and FFmpegRenderer remain authoritative. No second timeline, persistence system, mobile backend, transcript schema, renderer or provider-specific workflow was introduced.
+
+## Implemented domain and pipelines
+
+- VoiceProfile now represents preset, designed, cloned and imported voices with lifecycle, model/languages, references, authorization, consent scope, restrictions and non-secret metadata.
+- Provider-neutral VoiceCapabilities and VoiceProvider separate TTS, preset voice, voice design, cloning, cross-lingual cloning, voice conversion, streaming, timestamps, emotion and style.
+- Reference analysis has deterministic cache identity, canonical quality fields and ranked candidates. It never enrolls detected speakers automatically.
+- Enrollment requires explicit authorization and follows analyze → capability check → enroll → preview → approve → activate.
+- Voice design is a first-class description-driven workflow rather than a disguised clone.
+- SpeechAsset records generated type, profile, source text/version, project and source segments.
+- Duration fitting classifies ACCEPT, ADJUST_RATE, REWRITE_SHORTER, EXTEND_TIMELINE, REPLAN_SURROUNDING_EDIT or ASK_USER.
+- Provider timestamps are retained; missing timestamps receive deterministic estimates and can be enriched by the existing alignment provider.
+- Speech correction classifies caption-only versus audio replacement and uses typed EditPatch operations, validation, diff, lock-protected apply and immutable Version.
+- Dubbing creates linked DubbingTrack and caption-track clips for source segment, translation, SpeechAsset and VoiceProfile.
+- FFmpegRenderer includes dubbing in the existing generated-speech mix/ducking path. Export writes a provenance manifest distinguishing original, standard TTS, designed, cloned and translated speech.
+- Voice analysis/enrollment/design/preview/TTS/dubbing/alignment use the existing durable queue and GPU concurrency budget.
+- ProviderCall stores non-secret provider/model/operation/latency/status/duration/compute metadata.
+- Deletion revokes authorization, removes derived representations and generated caches, persists a deletion event, and calls remote deletion only when supported. Original interview media is not silently deleted.
+- MCP gained high-level voice tools. Normal MCP/network responses filter remote voice IDs, provider metadata and consent evidence.
+- A narrow bearer-authenticated network API wraps the same Core for mobile review/control preparation.
+
+## Schema migration
+
+Schema version remains 1. Changes are additive with defaults, so existing V1/V1.5 JSON remains readable. New directories are created for new projects and lazily for existing projects. Existing tool names and editing flows remain compatible.
+
+## Providers
+
+- FakeVoiceProvider: fully exercised offline for design, authorized clone, cross-language generation and deletion.
+- OpenAIVoiceProvider: implemented for hosted WAV speech, presets, custom-voice creation with an explicit consent-recording ID, cancellation, timeout and health; execution is credential/account-eligibility gated.
+- KokoroTTSProvider: retained for local preset voices and correctly advertises no cloning/design capability.
+- Qwen3-TTS, CosyVoice 3, Fish S2, IndexTTS 2.5 and F5-TTS were researched, not falsely presented as installed adapters. See `v2-voice-model-study.md` for licenses and capabilities.
+
+## Files changed
+
+Domain/persistence: `packages/core/src/schemas.ts`, `project-store.ts`, `patch-engine.ts`, `edit-engine.ts`. Providers/speech: `packages/providers/src/contracts.ts`, `fakes.ts`, `openai-voice.ts`; `packages/speech/src/voice.ts`, `tts.ts`. Runtime/surfaces: `packages/runtime/src/video-agent-core.ts`, `config.ts`, `factory.ts`; `packages/mcp/src/server.ts`; `packages/api/src/server.ts`; CLI and renderer. Tests, evals, benchmarks and documentation were extended without removing V1/V1.5 coverage.
+
+## Verification
+
+- Typecheck and build pass.
+- Full suite passed 28 tests in 11 files, covering authorization rejection, persistence, reference quality/cache, design, clone enrollment, TTS/cache, fit, replacement, generated timing, dubbing/captions, deletion, cancellation, retry/permanent failure, versioning, hosted-provider request boundaries, MCP registration and network authentication.
+- Existing MCP smoke, FFmpeg E2E and V1/V1.5 planner evaluation remain in final non-regression.
+- Fake benchmark reaches immutable v3 through speech replacement and dubbing; exact timings are in `v2-voice-benchmarks.md`.
+
+## Gated and known limitations
+
+Real hosted/custom OpenAI voice calls, local Kokoro synthesis, Qwen/CosyVoice/Fish/Index/F5 inference and objective voice metrics were not executed because credentials, eligibility and runtimes/weights were unavailable. `eval:voice` reports every omitted metric.
+
+The built-in reference analyzer does not yet calculate true acoustic SNR/clipping/music/reverb with a dedicated DSP/ML analyzer. Translation text is supplied to `dubbing_generate`; a translation provider is not yet selected. Replacement uses the existing mix/ducking renderer rather than phoneme-level source reconstruction. The network API is a control-plane preparation layer, not a production identity gateway or full mobile client.
+
+## Next mobile milestone
+
+Build the Review / Control Console against this API: resumable upload, proposal approval, preview playback, scoped feedback, version comparison, job progress, preset/design/authorized-clone selection and export approval. Keep multi-track NLE controls and editing logic out of the client.

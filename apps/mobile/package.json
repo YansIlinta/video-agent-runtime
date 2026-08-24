@@ -1,0 +1,28 @@
+{
+  "name": "video-agent-mobile",
+  "version": "0.4.0-prototype",
+  "private": true,
+  "scripts": {
+    "start": "react-native start",
+    "ios": "react-native run-ios",
+    "android": "react-native run-android",
+    "codegen:android": "cd android && gradlew generateCodegenArtifactsFromSchema",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.2.0",
+    "react-native": "0.87.0"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "latest",
+    "@react-native/typescript-config": "latest",
+    "@types/react": "latest",
+    "typescript": "^5.9.0"
+  },
+  "codegenConfig": {
+    "name": "NativeVideoHostSpec",
+    "type": "modules",
+    "jsSrcsDir": "specs",
+    "android": { "javaPackageName": "com.videoagent.mobile" }
+  }
+}

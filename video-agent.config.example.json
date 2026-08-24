@@ -1,0 +1,27 @@
+{
+  "workspaceRoot": "./video-projects",
+  "providers": {
+    "planner": "fake",
+    "plannerModel": "gpt-5.4-mini",
+    "asr": "fake",
+    "asrModel": "small",
+    "alignment": "none",
+    "diarization": "none",
+    "tts": "fake",
+    "ttsModel": "deterministic-voice-v1"
+  },
+  "executables": { "python": "python", "ffmpeg": "ffmpeg", "ffprobe": "ffprobe" },
+  "limits": {
+    "maxInputDurationUs": 14400000000,
+    "maxUploadBytes": 5368709120,
+    "maxConcurrentJobs": 2,
+    "maxFfmpegProcesses": 1,
+    "maxAsrJobs": 1,
+    "maxGpuJobs": 1,
+    "maxPreviewDurationUs": 600000000,
+    "maxDiskBytesPerProject": 21474836480,
+    "maxRetainedPreviews": 10
+  },
+  "jobs": { "maxAttempts": 3, "baseRetryMs": 250, "concurrency": 2 },
+  "logging": { "level": "info", "includeSensitivePaths": false }
+}

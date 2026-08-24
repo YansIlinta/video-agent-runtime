@@ -1,0 +1,35 @@
+import NativeVideoHost from '../specs/NativeVideoHost';
+import type {NativeVideoHostBridge} from '../../../packages/mobile/src/native-bridge';
+
+const parse = <T>(value: string): T => JSON.parse(value) as T;
+export const nativeBridge: NativeVideoHostBridge = {
+  platform: async () => (await NativeVideoHost.platform()) as 'ios' | 'android',
+  read: async uri => [...await NativeVideoHost.read(uri)],
+  write: (uri, bytes, atomic, createOnly) => NativeVideoHost.write(uri, bytes, atomic, createOnly),
+  remove: (uri, recursive) => NativeVideoHost.remove(uri, recursive),
+  exists: uri => NativeVideoHost.exists(uri),
+  stat: async uri => parse(await NativeVideoHost.statJson(uri)),
+  list: async uri => parse(await NativeVideoHost.listJson(uri)),
+  copy: (source, destination) => NativeVideoHost.copy(source, destination),
+  diskFreeBytes: () => NativeVideoHost.diskFreeBytes(),
+  pickVideo: async () => { const value = await NativeVideoHost.pickVideoJson(); return value ? parse(value) : undefined; },
+  probe: async uri => parse(await NativeVideoHost.probeJson(uri)),
+  render: async spec => parse(await NativeVideoHost.renderJson(JSON.stringify(spec))),
+  cancelRender: id => NativeVideoHost.cancelRender(id),
+  rendererCapabilities: async () => parse(await NativeVideoHost.rendererCapabilitiesJson()),
+  secureSet: (key, value) => NativeVideoHost.secureSet(key, value),
+  secureGet: async key => (await NativeVideoHost.secureGet(key)) ?? undefined,
+  secureDelete: key => NativeVideoHost.secureDelete(key),
+  http: async request => parse(await NativeVideoHost.httpJson(JSON.stringify(request))),
+  scheduleBackground: task => NativeVideoHost.scheduleBackgroundJson(JSON.stringify(task)),
+  cancelBackground: id => NativeVideoHost.cancelBackground(id),
+  pendingBackground: async () => parse(await NativeVideoHost.pendingBackgroundJson()),
+  backgroundBudgetMs: async () => { const value = await NativeVideoHost.backgroundBudgetMs(); return value < 0 ? undefined : value; },
+  permissionStatus: async kind => (await NativeVideoHost.permissionStatus(kind)) as never,
+  requestPermission: async kind => (await NativeVideoHost.requestPermission(kind)) as never,
+  resourceBudget: async () => parse(await NativeVideoHost.resourceBudgetJson()),
+  sha256: data => NativeVideoHost.sha256Json(JSON.stringify(data)),
+  sha256File: uri => NativeVideoHost.sha256File(uri),
+  randomBytes: length => [...NativeVideoHost.randomBytes(length)],
+  createId: () => NativeVideoHost.createId(),
+};
