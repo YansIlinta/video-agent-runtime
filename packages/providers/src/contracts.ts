@@ -38,13 +38,24 @@ export interface VoiceEnrollmentInput {
   referenceText?: string;
   /** Clean, single-speaker range selected from transcript/quality evidence. */
   referenceRangeSeconds?: { start: number; end: number };
+  /** Explicit opt-in to speaker-embedding-only enrollment when the provider supports it. Never implied by a missing transcript. */
+  allowEmbeddingOnly?: boolean;
   providerAuthorizationId?: string;
   authorization: { grantedBy: string; grantedAt: string; evidence: string; scope: string };
 }
 export interface VoiceEnrollmentResult { providerVoiceId: string; model: string; providerMetadata?: Record<string, unknown>; derivedRepresentation?: Uint8Array }
 export interface VoiceDesignResult { providerVoiceId: string; model: string; sample: TTSResult; providerMetadata?: Record<string, unknown> }
+export interface VoiceCloneReferencePolicy {
+  minDurationSeconds: number;
+  maxDurationSeconds: number;
+  /** True when high-quality cloning requires exact text aligned to the selected reference range. */
+  highQualityRequiresReferenceText: boolean;
+  /** Whether the provider can deliberately fall back to a speaker embedding without reference text. */
+  embeddingOnlySupported: boolean;
+}
 export interface VoiceProvider extends TTSProvider {
   voiceCapabilities(): VoiceCapabilities;
+  cloneReferencePolicy?(): VoiceCloneReferencePolicy;
   enrollVoice?(input: VoiceEnrollmentInput, context?: OperationContext): Promise<VoiceEnrollmentResult>;
   designVoice?(input: VoiceDesignRequest, context?: OperationContext): Promise<VoiceDesignResult>;
   deleteVoice?(providerVoiceId: string, context?: OperationContext): Promise<void>;
