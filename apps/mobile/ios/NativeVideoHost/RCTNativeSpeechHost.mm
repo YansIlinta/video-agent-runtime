@@ -15,8 +15,19 @@
   }];
 }
 
+- (void)synthesizeOpenAI:(NSString *)requestJson resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  [_service synthesizeOpenAI:requestJson completion:^(NSString *value, NSError *error) {
+    error ? reject(@"SPEECH_PROVIDER", error.localizedDescription, error) : resolve(value);
+  }];
+}
+
 - (void)cancelTranscription:(NSString *)requestId resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   [_service cancelTranscription:requestId];
+  resolve(nil);
+}
+
+- (void)cancelSynthesis:(NSString *)requestId resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  [_service cancelSynthesis:requestId];
   resolve(nil);
 }
 @end
