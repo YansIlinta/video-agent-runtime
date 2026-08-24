@@ -7,6 +7,16 @@ import com.facebook.react.module.model.ReactModuleInfo
 import com.facebook.react.module.model.ReactModuleInfoProvider
 
 class NativeVideoHostPackage : BaseReactPackage() {
-  override fun getModule(name: String, context: ReactApplicationContext): NativeModule? = if (name == NativeVideoHostModule.NAME) NativeVideoHostModule(context) else null
-  override fun getReactModuleInfoProvider() = ReactModuleInfoProvider { mapOf(NativeVideoHostModule.NAME to ReactModuleInfo(NativeVideoHostModule.NAME, NativeVideoHostModule.NAME, false, false, false, true)) }
+  override fun getModule(name: String, context: ReactApplicationContext): NativeModule? = when (name) {
+    NativeVideoHostModule.NAME -> NativeVideoHostModule(context)
+    NativeSpeechHostModule.NAME -> NativeSpeechHostModule(context)
+    else -> null
+  }
+
+  override fun getReactModuleInfoProvider() = ReactModuleInfoProvider {
+    mapOf(
+      NativeVideoHostModule.NAME to ReactModuleInfo(NativeVideoHostModule.NAME, NativeVideoHostModule.NAME, false, false, false, true),
+      NativeSpeechHostModule.NAME to ReactModuleInfo(NativeSpeechHostModule.NAME, NativeSpeechHostModule.NAME, false, false, false, true),
+    )
+  }
 }

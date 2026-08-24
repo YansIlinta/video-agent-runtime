@@ -19,7 +19,14 @@ export class NativeMobileRenderer implements Renderer {
   capabilities(): RendererCapabilities {
     return this.current ?? { trim: true, concat: true, crop: false, scale: false, preserveAudio: true, speed: false, captionBurnIn: false, audioDucking: false, overlay: false, backgroundExport: false };
   }
-  async refreshCapabilities() { this.current = await this.native.rendererCapabilities(); return this.current; }
+  async refreshCapabilities() {
+    const reported = await this.native.rendererCapabilities();
+    // Neither current native renderer implements content-discarding crop. Both only normalize/fill
+    // output geometry. Clamp the historical native `crop: true` overclaim at the portable boundary
+    // so an EditPlan cannot silently request behavior the renderer does not perform.
+    this.current = { ...reported, crop: false };
+    return this.current;
+  }
   renderPreview(request: Omit<RenderRequest, "mode">) { return this.render({ ...request, mode: "preview" }); }
   renderFinal(request: Omit<RenderRequest, "mode">) { return this.render({ ...request, mode: "final" }); }
   private async render(request: RenderRequest) {

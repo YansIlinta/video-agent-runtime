@@ -1,46 +1,78 @@
-#!/usr/bin/env python3
 import argparse
 import json
+import sys
 
 
-def parse_args():
+def device_config(torch):
+    if torch.cuda.is_available():
+        return "cuda:0", torch.bfloat16
+    return "cpu", torch.float32
+
+
+def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["custom", "clone", "design"], required=True)
+    parser.add_argument("--model", required=True)
     parser.add_argument("--text", required=True)
-    parser.add_argument("--speaker", required=True)
     parser.add_argument("--language", default="Auto")
-    parser.add_argument("--model", default="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--instruct", default="")
-    return parser.parse_args()
+    parser.add_argument("--speaker")
+    parser.add_argument("--ref-audio")
+    parser.add_argument("--ref-text")
+    parser.add_argument("--instruct")
+    args = parser.parse_args()
 
+    try:
+        import soundfile as sf
+        import torch
+        from qwen_tts import Qwen3TTSModel
+    except ImportError as error:
+        print(f"qwen-tts runtime is not installed in VIDEO_AGENT_PYTHON: {error}", file=sys.stderr)
+        return 2
 
-def main():
-    args = parse_args()
-    import soundfile as sf
-    import torch
-    from qwen_tts import Qwen3TTSModel
-
-    use_cuda = torch.cuda.is_available()
-    dtype = torch.bfloat16 if use_cuda else torch.float32
-    device = "cuda:0" if use_cuda else "cpu"
-    model = Qwen3TTSModel.from_pretrained(
-        args.model,
-        dtype=dtype,
-        device_map=device,
-    )
-    wavs, sample_rate = model.generate_custom_voice(
-        text=args.text,
-        speaker=args.speaker,
-        language=args.language or "Auto",
-        instruct=args.instruct or None,
-    )
-    if not wavs:
-        raise RuntimeError("Qwen3-TTS returned no waveform")
-    wav = wavs[0]
-    sf.write(args.output, wav, sample_rate)
-    duration = float(len(wav)) / float(sample_rate)
-    print(json.dumps({"durationSeconds": duration, "sampleRate": int(sample_rate)}))
+    try:
+        device, dtype = device_config(torch)
+        model = Qwen3TTSModel.from_pretrained(args.model, device_map=device, dtype=dtype)
+        if args.mode == "custom":
+            if not args.speaker or not args.speaker.strip():
+                raise ValueError("custom mode requires --speaker")
+            wavs, sr = model.generate_custom_voice(
+                text=args.text,
+                speaker=args.speaker,
+                language=args.language or "Auto",
+                instruct=(args.instruct.strip() if args.instruct else None),
+            )
+        elif args.mode == "clone":
+            if not args.ref_audio:
+                raise ValueError("clone mode requires --ref-audio")
+            ref_text = args.ref_text.strip() if args.ref_text else None
+            wavs, sr = model.generate_voice_clone(
+                text=args.text,
+                language=args.language or "Auto",
+                ref_audio=args.ref_audio,
+                ref_text=ref_text,
+                x_vector_only_mode=not bool(ref_text),
+                non_streaming_mode=True,
+            )
+        else:
+            if not args.instruct or not args.instruct.strip():
+                raise ValueError("design mode requires --instruct")
+            wavs, sr = model.generate_voice_design(
+                text=args.text,
+                language=args.language or "Auto",
+                instruct=args.instruct,
+                non_streaming_mode=True,
+            )
+        if not wavs:
+            raise RuntimeError("Qwen3-TTS returned no waveform")
+        sf.write(args.output, wavs[0], sr)
+        duration = float(len(wavs[0])) / float(sr)
+        print(json.dumps({"durationSeconds": duration, "sampleRate": int(sr), "mode": args.mode, "device": device}))
+        return 0
+    except Exception as error:
+        print(f"Qwen3-TTS failed: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

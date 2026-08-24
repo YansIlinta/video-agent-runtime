@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   assetSchema,
@@ -44,9 +44,32 @@ import {
 } from "./schemas.js";
 
 const PROJECT_ID = /^[a-z0-9][a-z0-9-]{2,100}$/;
+const REPOSITORY_IO_CONCURRENCY = 8;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 async function exists(filePath: string): Promise<boolean> {
@@ -56,12 +79,6 @@ async function exists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function sha256File(filePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
-  return hash.digest("hex");
 }
 
 export function assertContained(root: string, candidate: string): string {
@@ -150,9 +167,10 @@ export class ProjectStore {
   async prunePreviews(projectId: string, retain: number): Promise<string[]> {
     const directory = this.file(projectId, "previews");
     const entries = await readdir(directory, { withFileTypes: true });
-    const files = await Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".mp4")).map(async (entry) => ({ path: path.join(directory, entry.name), mtimeMs: (await stat(path.join(directory, entry.name))).mtimeMs })));
+    const candidates = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".mp4"));
+    const files = await mapLimit(candidates, REPOSITORY_IO_CONCURRENCY, async (entry) => ({ path: path.join(directory, entry.name), mtimeMs: (await stat(path.join(directory, entry.name))).mtimeMs }));
     const removeFiles = files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(Math.max(0, retain));
-    await Promise.all(removeFiles.map((entry) => rm(entry.path, { force: true })));
+    await mapLimit(removeFiles, REPOSITORY_IO_CONCURRENCY, async (entry) => { await rm(entry.path, { force: true }); });
     return removeFiles.map((entry) => path.basename(entry.path));
   }
 
@@ -302,7 +320,7 @@ export class ProjectStore {
   async listVersions(projectId: string): Promise<ProjectVersion[]> {
     const directory = this.file(projectId, "edits/versions");
     const names = (await readdir(directory)).filter((name) => /^v\d+\.json$/.test(name)).sort((a, b) => Number(a.slice(1, -5)) - Number(b.slice(1, -5)));
-    return Promise.all(names.map((name) => readJson(path.join(directory, name), projectVersionSchema)));
+    return mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), projectVersionSchema));
   }
 
   async writeFeedback(projectId: string, feedback: Feedback): Promise<void> {
@@ -316,7 +334,7 @@ export class ProjectStore {
   async listFeedback(projectId: string): Promise<Feedback[]> {
     const directory = this.file(projectId, "feedback");
     const names = (await readdir(directory)).filter((name) => !name.startsWith("diagnosis-") && name.endsWith(".json"));
-    const items = await Promise.all(names.map((name) => readJson(path.join(directory, name), feedbackSchema)));
+    const items = await mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), feedbackSchema));
     return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -339,16 +357,16 @@ export class ProjectStore {
   }
 
   async readSpeechAsset(projectId: string, speechAssetId: string): Promise<SpeechAsset> { return readJson(this.file(projectId, `speech/${path.basename(speechAssetId)}.json`), speechAssetSchema); }
-  async listSpeechAssets(projectId: string): Promise<SpeechAsset[]> { const directory = this.file(projectId, "speech"); const names = (await readdir(directory)).filter((name) => name.endsWith(".json")); return Promise.all(names.map((name) => readJson(path.join(directory, name), speechAssetSchema))); }
+  async listSpeechAssets(projectId: string): Promise<SpeechAsset[]> { const directory = this.file(projectId, "speech"); const names = (await readdir(directory)).filter((name) => name.endsWith(".json")); return mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), speechAssetSchema)); }
 
   async writeVoiceProfile(projectId: string, profile: VoiceProfile): Promise<void> { const target = this.file(projectId, `voices/profiles/${profile.id}.json`); await mkdir(path.dirname(target), { recursive: true }); await atomicWriteJson(target, voiceProfileSchema.parse(profile)); }
   async readVoiceProfile(projectId: string, profileId: string): Promise<VoiceProfile> { return readJson(this.file(projectId, `voices/profiles/${path.basename(profileId)}.json`), voiceProfileSchema); }
-  async listVoiceProfiles(projectId: string, includeDeleted = false): Promise<VoiceProfile[]> { const directory = this.file(projectId, "voices/profiles"); await mkdir(directory, { recursive: true }); const names = (await readdir(directory)).filter((name) => name.endsWith(".json")); const profiles = await Promise.all(names.map((name) => readJson(path.join(directory, name), voiceProfileSchema))); return profiles.filter((profile) => includeDeleted || profile.status !== "deleted"); }
+  async listVoiceProfiles(projectId: string, includeDeleted = false): Promise<VoiceProfile[]> { const directory = this.file(projectId, "voices/profiles"); await mkdir(directory, { recursive: true }); const names = (await readdir(directory)).filter((name) => name.endsWith(".json")); const profiles = await mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), voiceProfileSchema)); return profiles.filter((profile) => includeDeleted || profile.status !== "deleted"); }
   async writeVoiceReferenceQuality(projectId: string, report: VoiceReferenceQualityReport): Promise<void> { const target = this.file(projectId, `analysis/voice/${report.id}.json`); await mkdir(path.dirname(target), { recursive: true }); await atomicWriteJson(target, voiceReferenceQualityReportSchema.parse(report)); }
   async findVoiceReferenceQualityByCacheKey(projectId: string, cacheKey: string): Promise<VoiceReferenceQualityReport | undefined> { const directory = this.file(projectId, "analysis/voice"); await mkdir(directory, { recursive: true }); const names = (await readdir(directory)).filter((name) => name.endsWith(".json")); for (const name of names) { const report = await readJson(path.join(directory, name), voiceReferenceQualityReportSchema); if (report.cacheKey === cacheKey) return report; } return undefined; }
   async writeVoiceDeletionEvent(projectId: string, event: VoiceDeletionEvent): Promise<void> { const target = this.file(projectId, `voices/deletions/${event.createdAt.replace(/[:.]/g, "-")}-${event.id}.json`); await mkdir(path.dirname(target), { recursive: true }); await atomicWriteJson(target, voiceDeletionEventSchema.parse(event)); }
   async removeProjectFile(projectId: string, relativePath: string): Promise<void> { await rm(this.file(projectId, relativePath), { force: true, recursive: false }); }
-  async writeProjectFile(projectId: string, relativePath: string, data: Uint8Array | string, createOnly = false): Promise<void> { const target = this.file(projectId, relativePath); await mkdir(path.dirname(target), { recursive: true }); await import("node:fs/promises").then((fs) => fs.writeFile(target, data, { flag: createOnly ? "wx" : "w" })); }
+  async writeProjectFile(projectId: string, relativePath: string, data: Uint8Array | string, createOnly = false): Promise<void> { const target = this.file(projectId, relativePath); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, data, { flag: createOnly ? "wx" : "w" }); }
   async readProjectFile(projectId: string, relativePath: string): Promise<Uint8Array> { return new Uint8Array(await readFile(this.file(projectId, relativePath))); }
   async projectFileSize(projectId: string, relativePath: string): Promise<number> { return (await stat(this.file(projectId, relativePath))).size; }
 
@@ -363,7 +381,7 @@ export class ProjectStore {
   async listJobs(projectId: string): Promise<Job[]> {
     const directory = this.file(projectId, "jobs");
     const names = (await readdir(directory)).filter((name) => name.endsWith(".json"));
-    const jobs = await Promise.all(names.map((name) => readJson(path.join(directory, name), jobSchema)));
+    const jobs = await mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), jobSchema));
     return jobs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -382,7 +400,7 @@ export class ProjectStore {
   async listVisualEvidence(projectId: string): Promise<VisualEvidence[]> {
     const directory = this.file(projectId, "analysis/visual");
     const names = (await readdir(directory)).filter((name) => name.endsWith(".json"));
-    return Promise.all(names.map((name) => readJson(path.join(directory, name), visualEvidenceSchema)));
+    return mapLimit(names, REPOSITORY_IO_CONCURRENCY, (name) => readJson(path.join(directory, name), visualEvidenceSchema));
   }
 
   async copySourceAsset(projectId: string, sourcePath: string, maxBytes: number): Promise<{ relativePath: string; sha256: string; sizeBytes: number }> {

@@ -1,7 +1,7 @@
 import type { ProviderCall } from "../../core/src/schemas.js";
 import { FetchHttpAdapter, SystemClock, WebCryptoAdapter, WebIdAdapter } from "../../platform/src/portable.js";
 import type { HttpAdapter, RuntimePrimitives } from "../../platform/src/contracts.js";
-import type { StructuredTextGenerator } from "./speech-pipeline.js";
+import type { StructuredTextGenerator } from "../../providers/src/contracts.js";
 
 interface ChatBody {
   id?: string;
