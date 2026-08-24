@@ -7,6 +7,7 @@ This directory contains the technical documentation for the runtime as it exists
 | If you want to… | Read |
 | --- | --- |
 | Understand the product and run it | [../README.md](../README.md) |
+| Set up a development environment | [development.md](development.md) |
 | Understand product wording and claim boundaries | [product-positioning.md](product-positioning.md) |
 | Understand the core architecture | [architecture.md](architecture.md) |
 | Connect an agent through MCP | [speech-mcp.md](speech-mcp.md) and [`../mcp.example.json`](../mcp.example.json) |
@@ -21,6 +22,7 @@ This directory contains the technical documentation for the runtime as it exists
 | Document | Contents |
 | --- | --- |
 | [product-positioning.md](product-positioning.md) | Canonical product wording, public terminology, non-goals and verification/claim levels |
+| [development.md](development.md) | Local setup, provider configuration, commands, package boundaries, performance rules and testing strategy |
 | [architecture.md](architecture.md) | Package boundaries, `source → Version → export`, ProjectStore layout, workflow, EditPlan/EditPatch, jobs, rendering and recovery |
 | [security.md](security.md) | Secret policy, path/media boundaries, filtered outputs, voice-reference handling and agent restrictions |
 | [control-api.md](control-api.md) | Narrow bearer-authenticated local HTTP control surface |
@@ -99,6 +101,7 @@ A condensed release history is maintained in [../CHANGELOG.md](../CHANGELOG.md).
 ## Documentation conventions
 
 - Root README = product home and quickest path to a working run.
+- `docs/development.md` = day-to-day setup and engineering commands.
 - `docs/` = current technical truth.
 - `docs/releases/` = version-stamped historical evidence.
 - Provider capability tables describe the adapter that actually exists, not every feature an upstream model may advertise.
