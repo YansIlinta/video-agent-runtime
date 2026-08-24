@@ -17,7 +17,9 @@ The Swift implementation uses app-controlled storage for imported media. A secur
 1. Generate the React Native 0.87 Android shell and merge `android/native-host-dependencies.gradle` into `android/app/build.gradle`.
 2. Add `NativeVideoHostPackage()` to the package list in `MainApplication.kt`.
 3. Run `gradlew generateCodegenArtifactsFromSchema` before compilation.
-4. Register `VideoAgentWorker` through WorkManager. A foreground service is intentionally not enabled until a real export exceeds ordinary WorkManager constraints and the notification UX is implemented.
+4. Register `VideoAgentWorker` through WorkManager. Work is tagged with both `NativeVideoHostModule.WORK_TAG` and the job id, which is what `pendingBackground()` reads back.
+5. To make the wake-up actually resume work, add a `HeadlessJsTaskService`, declare it in the manifest, and register a matching `AppRegistry.registerHeadlessTask` handler that calls `DurableJobQueue.recover()`. Until that exists, `VideoAgentWorker` only completes; recovery happens on the next foreground launch.
+6. A foreground service is intentionally not enabled until a real export exceeds ordinary WorkManager constraints and the notification UX is implemented.
 
 The picker uses `ACTION_OPEN_DOCUMENT`/SAF. `content://` is accepted only at the import boundary and copied into app-private project storage before Core sees the asset.
 

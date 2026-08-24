@@ -1,5 +1,10 @@
 {
-  "extends": "@react-native/typescript-config/tsconfig.json",
-  "compilerOptions": { "strict": true, "baseUrl": "." },
-  "include": ["App.tsx", "index.js", "src/**/*.ts", "specs/**/*.ts"]
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "types": [],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["App.tsx", "src/**/*.ts", "specs/**/*.ts"]
 }

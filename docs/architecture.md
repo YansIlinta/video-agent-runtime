@@ -15,9 +15,13 @@ All timeline values are integer microseconds. Provider output is parsed through 
 - `packages/speech`: faster-whisper and Kokoro sidecar adapters, transcript normalization, speech-duration fitting.
 - `packages/media`: safe subprocess execution and ffprobe metadata extraction.
 - `packages/render`: FFmpeg filter-graph compiler, preview/final profiles, audio mixing, captions, self-check.
+- `packages/platform`: host contracts — filesystem, secure storage, HTTP, background execution, clock/ID/crypto, permissions, capabilities, resource budgets — plus the `node-local` adapters.
 - `packages/runtime`: the application service and dependency assembly.
+- `packages/mobile`: the portable mobile host — native adapters, project repository, provider settings, capability-gated renderer, ContextPack privacy accounting, composition root.
 - `packages/mcp`: constrained MCP tools with structured results.
+- `packages/api`: the narrow bearer-authenticated control server.
 - `apps/cli`: equivalent local commands for humans and automation.
+- `apps/mobile`: React Native shell sources, the Codegen TurboModule spec, and the Swift/Kotlin native host implementations.
 
 ## Durable project layout
 
@@ -42,6 +46,10 @@ Workflow remains the product state machine. Durable Job files represent executio
 ## Rendering
 
 FFmpeg receives argument arrays, never agent-authored shell strings. The renderer trims and concatenates visual clips, preserves or retimes original audio, burns editable captions, mixes narration, and applies explicit side-chain ducking. Preview supports partial ranges and a faster profile; final export requires approval of the active version.
+
+## Hosts
+
+The domain runtime depends on injected host contracts rather than on Node. The Node host supplies the OS filesystem, environment secrets, `fetch`, and FFmpeg. A mobile host supplies app-sandbox storage, Keychain or AndroidKeyStore, native HTTP, and AVFoundation or Media3. Both compose the same `VideoAgentCore` with the same Workflow, EditPlan, Timeline, Version and Job semantics — there is no host-specific editing model. See [mobile/README.md](mobile/README.md).
 
 ## Voice identity and mobile API
 

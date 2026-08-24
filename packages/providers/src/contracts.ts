@@ -1,4 +1,4 @@
-import type { AlignmentResult, DiarizationResult, EditingStrategy, EditPatch, EditPlan, ProviderCall, Timeline, Transcript, VisualEvidence, VoiceCapabilities, VoiceDesignRequest, VoiceProfile } from "../../core/src/index.js";
+import type { AlignmentResult, DiarizationResult, EditingStrategy, EditPatch, EditPlan, ProviderCall, Timeline, Transcript, VisualEvidence, VoiceCapabilities, VoiceDesignRequest, VoiceProfile } from "../../core/src/schemas.js";
 import type { ZodType } from "zod";
 
 export interface OperationContext { signal?: AbortSignal; onProgress?: (progress: number, phase: string, message?: string) => void }

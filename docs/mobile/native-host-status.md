@@ -78,8 +78,8 @@ A real credential was not supplied, so live connection, structured generation, m
 
 Passed on Windows / Node 24:
 
-- `npm run typecheck`
-- `npm run build`
+- `npm run typecheck` and `npm run build` — these cover `packages/**`, `apps/cli` and `tests`. They **exclude `apps/mobile`**, which cannot compile under `module: NodeNext`.
+- `npm run typecheck:mobile` — the React Native surface (`App.tsx`, `specs/`, `src/`) and everything it imports, under the React Native TypeScript config. Run `npm run mobile:install` first. This check did not exist before 2026-08-24 and was clean on its first green run only after four defects it exposed were fixed; see [known-issues.md](known-issues.md) items 1a–1d.
 - `npm test -- --maxWorkers=1`: 13 files, 36/36 tests
 - `npm run smoke:mcp`: 59 tools; project create and system status passed
 - `npm run cli -- doctor`: ready; FFmpeg 6.0 available
@@ -90,7 +90,7 @@ The Node FFmpeg E2E produced three self-checked previews and a final export. Obs
 
 Skipped due to unavailable tools/device:
 
-- React Native dependency installation and Codegen
+- Codegen (requires the generated app shells)
 - Xcode/CocoaPods and Android Gradle compilation
 - simulator/emulator and physical-device smoke
 - live BYOK request

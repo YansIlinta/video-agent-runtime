@@ -23,6 +23,8 @@
     ,"benchmark:voice": "tsx scripts/voice-benchmark.ts"
     ,"benchmark:mobile-host": "tsx scripts/mobile-host-benchmark.ts"
     ,"test:mobile-native-contracts": "vitest run tests/native-mobile-host.test.ts"
+    ,"mobile:install": "npm --prefix apps/mobile install"
+    ,"typecheck:mobile": "npm --prefix apps/mobile run typecheck"
   },
   "engines": {
     "node": ">=22"

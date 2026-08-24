@@ -7,7 +7,9 @@ import type { EditPlan, EditPatch, EditingStrategy, Feedback, ProjectVersion, Vo
 import type { ProjectRepository } from "../../core/src/repository.js";
 import { SystemClock, WebCryptoAdapter, WebIdAdapter } from "../../platform/src/portable.js";
 import type { BackgroundExecutionAdapter, RuntimePrimitives } from "../../platform/src/contracts.js";
-import type { AlignmentProvider, ASRProvider, DiarizationProvider, LLMProvider, OperationContext, Renderer, TTSProvider, VisualEvidenceProvider, VoiceProvider } from "../../providers/src/index.js";
+// Import the specific contract module, not the providers barrel: the barrel re-exports Node-only
+// implementations (fakes, openai-voice, registry → node-host) into every consuming host graph.
+import type { AlignmentProvider, ASRProvider, DiarizationProvider, LLMProvider, OperationContext, Renderer, TTSProvider, VisualEvidenceProvider, VoiceProvider } from "../../providers/src/contracts.js";
 import { DurableJobQueue } from "../../jobs/src/index.js";
 import { StructuredLogger } from "./logger.js";
 import { analyzeVoiceReference, asrCacheKey, assertVoiceAuthorized, fitSpeechToRange, fitTtsToRange, fuseTranscript, normalizeAsrResult, synthesizeSpeech } from "./portable-services.js";
@@ -21,8 +23,8 @@ export interface RuntimeProviders {
   diarization?: DiarizationProvider;
   visual?: VisualEvidenceProvider;
   voice?: VoiceProvider;
-  mediaProbe?: { probe(uri: string, context?: OperationContext): Promise<import("../../core/src/index.js").Asset["metadata"]> };
-  previewSelfCheck?: (outputPath: string, timeline: import("../../core/src/index.js").Timeline) => Promise<{ passed: boolean; warnings: string[] }>;
+  mediaProbe?: { probe(uri: string, context?: OperationContext): Promise<import("../../core/src/schemas.js").Asset["metadata"]> };
+  previewSelfCheck?: (outputPath: string, timeline: import("../../core/src/schemas.js").Timeline) => Promise<{ passed: boolean; warnings: string[] }>;
 }
 
 export interface RuntimeLimits { maxUploadBytes: number; maxInputDurationUs?: number; maxPreviewDurationUs?: number; maxDiskBytesPerProject?: number; maxRetainedPreviews?: number; maxConcurrentJobs?: number; maxFfmpegProcesses?: number; maxAsrJobs?: number; maxGpuJobs?: number; jobMaxAttempts?: number; baseRetryMs?: number }
@@ -63,7 +65,7 @@ export class VideoAgentCore {
     return this.store.create(name);
   }
 
-  enqueueJob(projectId: string, type: import("../../core/src/index.js").Job["type"], input: unknown, idempotencyKey?: string) { return this.jobs.enqueue(projectId, type, input, idempotencyKey); }
+  enqueueJob(projectId: string, type: import("../../core/src/schemas.js").Job["type"], input: unknown, idempotencyKey?: string) { return this.jobs.enqueue(projectId, type, input, idempotencyKey); }
   jobStatus(projectId: string, jobId: string) { return this.jobs.status(projectId, jobId); }
   listJobs(projectId: string) { return this.jobs.list(projectId); }
   cancelJob(projectId: string, jobId: string) { return this.jobs.cancel(projectId, jobId); }
