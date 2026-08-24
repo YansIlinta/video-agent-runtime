@@ -15,6 +15,12 @@ import { buildMobileContextPack } from "./privacy.js";
 import { AuditedMobileHttpAdapter } from "./network-audit.js";
 import { MobileOpenAIASRProvider, MobileOpenAITTSProvider, MutableASRProvider, MutableTTSProvider } from "./speech-providers.js";
 
+const OFFICIAL_OPENAI_BASE = "https://api.openai.com/v1";
+function assertOfficialSpeechConfig(config: ProviderConfig, role: "ASR" | "TTS") {
+  if (config.kind !== "openai") throw new Error(`Mobile hosted ${role} currently supports the official OpenAI endpoint only`);
+  if (config.baseUrl.replace(/\/+$/u, "") !== OFFICIAL_OPENAI_BASE) throw new Error(`Mobile hosted ${role} is pinned to ${OFFICIAL_OPENAI_BASE}`);
+}
+
 class MutablePlanner implements LLMProvider {
   readonly id = "mobile-configurable-planner"; get model() { return this.current?.model ?? "unconfigured"; }
   private current?: LLMProvider;
@@ -59,8 +65,8 @@ export class VideoAgentFacade {
 
   connectProvider(config: ProviderConfig, apiKey?: string) { return this.configurePlanner(config, apiKey); }
   async configurePlanner(config: ProviderConfig, apiKey?: string, providerFactory?: (config: ProviderConfig, credential?: string) => LLMProvider) {
+    if (!["openai", "openai-compatible", "custom"].includes(config.kind) && !providerFactory) throw new Error(`${config.kind} planner implementation is not included on mobile`);
     const saved = await this.settings.saveToSlot("planner", config, apiKey);
-    if (!["openai", "openai-compatible", "custom"].includes(saved.kind) && !providerFactory) throw new Error(`${saved.kind} planner implementation is not included on mobile`);
     const credential = saved.credentialRef ? await this.settings.credential(saved.credentialRef) : undefined;
     const provider = providerFactory?.(saved, credential) ?? new OpenAILLMProvider(saved.model, credential, saved.baseUrl, 120_000, this.http, this.primitives, saved.reasoning);
     this.planner.set(provider); this.plannerConfig = saved;
@@ -69,9 +75,9 @@ export class VideoAgentFacade {
 
   async configureASR(config: ProviderConfig, apiKey?: string) {
     if (!this.speechNative) throw new Error("NativeSpeechHost is not installed; large media must never fall back to JS/base64 upload");
+    assertOfficialSpeechConfig(config, "ASR");
+    if (config.model !== "gpt-4o-transcribe-diarize" && config.model !== "whisper-1") throw new Error("Mobile ASR requires gpt-4o-transcribe-diarize or whisper-1 so edits always have timestamps");
     const saved = await this.settings.saveToSlot("asr", config, apiKey);
-    if (saved.kind !== "openai") throw new Error("Mobile hosted ASR currently supports the official OpenAI endpoint only");
-    if (saved.model !== "gpt-4o-transcribe-diarize" && saved.model !== "whisper-1") throw new Error("Mobile ASR requires gpt-4o-transcribe-diarize or whisper-1 so edits always have timestamps");
     const credential = saved.credentialRef ? await this.settings.credential(saved.credentialRef) : undefined;
     const provider = new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl);
     this.asr.set(provider);
@@ -79,8 +85,8 @@ export class VideoAgentFacade {
   }
 
   async configureTTS(config: ProviderConfig, apiKey?: string) {
+    assertOfficialSpeechConfig(config, "TTS");
     const saved = await this.settings.saveToSlot("tts", config, apiKey);
-    if (saved.kind !== "openai") throw new Error("Mobile hosted TTS currently supports the official OpenAI endpoint only");
     const credential = saved.credentialRef ? await this.settings.credential(saved.credentialRef) : undefined;
     const provider = new MobileOpenAITTSProvider(saved.model, credential, this.http, saved.baseUrl);
     this.tts.set(provider);
@@ -96,11 +102,11 @@ export class VideoAgentFacade {
     }
     if (slot === "asr") {
       if (!this.speechNative) throw new Error("NativeSpeechHost is not installed");
-      if (saved.kind !== "openai" || (saved.model !== "gpt-4o-transcribe-diarize" && saved.model !== "whisper-1")) throw new Error("Saved ASR configuration is not supported by this mobile build");
+      assertOfficialSpeechConfig(saved, "ASR");
+      if (saved.model !== "gpt-4o-transcribe-diarize" && saved.model !== "whisper-1") throw new Error("Saved ASR configuration is not supported by this mobile build");
       this.asr.set(new MobileOpenAIASRProvider(saved.model as MobileOpenAIASRModel, credential, this.speechNative, this.http, saved.baseUrl)); return;
     }
-    if (saved.kind !== "openai") throw new Error("Saved TTS configuration is not supported by this mobile build");
-    this.tts.set(new MobileOpenAITTSProvider(saved.model, credential, this.http, saved.baseUrl));
+    assertOfficialSpeechConfig(saved, "TTS"); this.tts.set(new MobileOpenAITTSProvider(saved.model, credential, this.http, saved.baseUrl));
   }
 
   async restoreProviderSlots() {
