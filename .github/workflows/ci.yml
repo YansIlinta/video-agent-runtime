@@ -22,6 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test -- --maxWorkers=1
       - run: npm run build
+      - run: npm run eval:speech-real
       - run: npm run smoke:speech-mcp
       - run: npm --prefix apps/mobile ci
       - run: npm run typecheck:mobile

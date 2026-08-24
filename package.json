@@ -21,6 +21,7 @@
     "smoke:speech-mcp": "tsx scripts/speech-mcp-smoke.ts",
     "demo": "tsx scripts/demo.ts",
     "eval": "tsx evals/run.ts",
+    "eval:speech-real": "tsx evals/real-speech-acceptance.ts",
     "benchmark:queue": "tsx scripts/queue-benchmark.ts",
     "eval:voice": "tsx evals/voice-run.ts",
     "benchmark:voice": "tsx scripts/voice-benchmark.ts",
