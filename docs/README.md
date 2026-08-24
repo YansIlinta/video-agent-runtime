@@ -7,6 +7,8 @@ This directory contains the technical documentation for the runtime as it exists
 | If you want to… | Read |
 | --- | --- |
 | Understand the product and run it | [../README.md](../README.md) |
+| Contribute code or documentation | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
+| Report or review a security-sensitive issue | [../SECURITY.md](../SECURITY.md) and [security.md](security.md) |
 | Set up a development environment | [development.md](development.md) |
 | Understand product wording and claim boundaries | [product-positioning.md](product-positioning.md) |
 | Understand the core architecture | [architecture.md](architecture.md) |
@@ -85,6 +87,15 @@ Measurement rules:
 
 The mobile implementation must not be described as device-ready until native compilation, simulator/device media tests and the documented measurement pass exist.
 
+## Open-source project entry points
+
+| File | Purpose |
+| --- | --- |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contribution scope, architecture guardrails, test expectations and PR guidance |
+| [../SECURITY.md](../SECURITY.md) | Security reporting and sensitive-data boundaries |
+| [../AGENTS.md](../AGENTS.md) | Repository rules for Claude Code, Codex and other coding agents |
+| [../.github/pull_request_template.md](../.github/pull_request_template.md) | Verification, performance, security and claim-boundary checklist for pull requests |
+
 ## Release history
 
 Version-stamped reports live in [`releases/`](releases/). Everything else describes the current system.
@@ -101,6 +112,9 @@ A condensed release history is maintained in [../CHANGELOG.md](../CHANGELOG.md).
 ## Documentation conventions
 
 - Root README = product home and quickest path to a working run.
+- `CONTRIBUTING.md` = public contribution contract.
+- `SECURITY.md` = public security-reporting entry point.
+- `AGENTS.md` = coding-agent repository guardrails.
 - `docs/development.md` = day-to-day setup and engineering commands.
 - `docs/` = current technical truth.
 - `docs/releases/` = version-stamped historical evidence.
