@@ -67,6 +67,9 @@ export function selectVoiceReference(
     const overlappingSegments = transcript.segments.filter((segment) => overlaps(requestedStart, requestedEnd, segment.startUs, segment.endUs));
     const knownSpeakers = new Set(overlappingSegments.map((segment) => segment.speakerId).filter((value): value is string => Boolean(value)));
     if (speakerId && knownSpeakers.size > 0 && [...knownSpeakers].some((value) => value !== speakerId)) continue;
+    // In a known multi-speaker transcript, an unlabeled interval is identity-ambiguous. Do not
+    // silently fold it into an otherwise clean speaker reference.
+    if (speakerId && transcriptSpeakers.size > 1 && overlappingSegments.some((segment) => !segment.speakerId)) continue;
     if (!speakerId && knownSpeakers.size > 1) continue;
     const resolvedSpeaker = speakerId ?? [...knownSpeakers][0];
 
