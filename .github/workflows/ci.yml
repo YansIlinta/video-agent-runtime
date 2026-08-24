@@ -27,9 +27,5 @@ jobs:
       - run: npm run benchmark:speech-summary
       - run: npm run smoke:speech-mcp
       - run: npm --prefix apps/mobile ci
-      - name: Audit mobile production dependency graph
-        run: npm --prefix apps/mobile audit --omit=dev --audit-level=high
-      - name: Print complete mobile audit for dependency triage
-        if: always()
-        run: npm --prefix apps/mobile audit --json || true
+      - run: npm run audit:mobile
       - run: npm run typecheck:mobile
