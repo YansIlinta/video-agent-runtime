@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HttpAdapter } from "../packages/platform/src/contracts.js";
-import type { NativeOpenAITranscriptionRequest, NativeSpeechHostBridge } from "../packages/mobile/src/native-speech-bridge.js";
+import type { NativeOpenAITranscriptionRequest, NativeOpenAITTSRequest, NativeSpeechHostBridge } from "../packages/mobile/src/native-speech-bridge.js";
 import { MobileOpenAIASRProvider, MobileOpenAITTSProvider, MutableASRProvider } from "../packages/mobile/src/speech-providers.js";
 
 class FakeHttp implements HttpAdapter {
@@ -11,7 +11,9 @@ class FakeHttp implements HttpAdapter {
 
 class FakeSpeechBridge implements NativeSpeechHostBridge {
   requests: NativeOpenAITranscriptionRequest[] = [];
+  synthesisRequests: NativeOpenAITTSRequest[] = [];
   cancelled: string[] = [];
+  cancelledSynthesis: string[] = [];
   response = JSON.stringify({ text: "hello", segments: [{ start: 0, end: 1, text: "hello", speaker: "A" }] });
   pending?: { id: string; reject(error: Error): void };
   waitForCancel = false;
@@ -20,7 +22,9 @@ class FakeSpeechBridge implements NativeSpeechHostBridge {
     if (!this.waitForCancel) return this.response;
     return new Promise((_resolve, reject) => { this.pending = { id: request.requestId, reject }; });
   }
+  async synthesizeOpenAI(request: NativeOpenAITTSRequest) { this.synthesisRequests.push(request); return { durationSeconds: 0.1, sampleRate: 24_000, model: request.model, voiceId: request.voiceId }; }
   async cancelTranscription(requestId: string) { this.cancelled.push(requestId); if (this.pending?.id === requestId) this.pending.reject(new Error("native upload cancelled")); }
+  async cancelSynthesis(requestId: string) { this.cancelledSynthesis.push(requestId); }
 }
 
 function wav(durationSeconds = 0.1, sampleRate = 24_000): Uint8Array {
@@ -60,8 +64,16 @@ describe("mobile speech providers", () => {
     const provider = new MobileOpenAIASRProvider("whisper-1", "sk-test", new FakeSpeechBridge(), new FakeHttp()); mutable.set(provider); expect(mutable.id).toBe(provider.id); expect(mutable.model).toBe("whisper-1");
   });
 
-  it("generates bounded WAV TTS with capabilities matching the actual adapter", async () => {
-    const http = new FakeHttp(wav()); const provider = new MobileOpenAITTSProvider("gpt-4o-mini-tts", "sk-test", http);
+  it("writes Core TTS output through the native bridge without returning WAV bytes to JS", async () => {
+    const native = new FakeSpeechBridge(); const http = new FakeHttp(); const provider = new MobileOpenAITTSProvider("gpt-4o-mini-tts", "sk-test", native, http, undefined, () => "fixed");
+    const result = await provider.synthesizeToFile!({ text: "hello", voiceId: "openai-alloy", language: "en", outputUri: "project://p/derived/a.wav" });
+    expect(result).toMatchObject({ durationSeconds: 0.1, sampleRate: 24_000, voiceId: "alloy" });
+    expect(native.synthesisRequests).toEqual([expect.objectContaining({ requestId: "tts-fixed", outputUri: "project://p/derived/a.wav", voiceId: "alloy" })]);
+    expect(http.requests).toHaveLength(0);
+  });
+
+  it("keeps a bounded byte-returning TTS fallback for direct provider callers", async () => {
+    const native = new FakeSpeechBridge(); const http = new FakeHttp(wav()); const provider = new MobileOpenAITTSProvider("gpt-4o-mini-tts", "sk-test", native, http);
     const result = await provider.synthesize({ text: "hello", voiceId: "alloy", language: "en" }); expect(result.durationSeconds).toBeCloseTo(0.1); expect(result.sampleRate).toBe(24_000);
     expect(provider.capabilities()).toEqual({ streaming: false, voiceSelection: true, voiceCloning: false, styleControl: false, speedControl: true, multilingual: true, timestamps: false, phonemeAlignment: false });
     await expect(provider.synthesize({ text: "x".repeat(4_097), voiceId: "alloy", language: "en" })).rejects.toThrow(/split narration/i);
