@@ -2,6 +2,7 @@ export * from "./asr.js";
 export * from "./qwen3-asr.js";
 export * from "./tts.js";
 export * from "./qwen3-tts.js";
+export * from "./ffmpeg-voice-reference.js";
 export * from "./fusion.js";
 export * from "./whisperx.js";
 export * from "./voice.js";
