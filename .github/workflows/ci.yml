@@ -27,4 +27,5 @@ jobs:
       - run: npm run benchmark:speech-summary
       - run: npm run smoke:speech-mcp
       - run: npm --prefix apps/mobile ci
+      - run: npm run audit:mobile
       - run: npm run typecheck:mobile

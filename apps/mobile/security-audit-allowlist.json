@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "reviewDue": "2026-09-25",
+  "allowedAdvisories": [
+    "GHSA-w3rx-r6r6-pgpr",
+    "GHSA-5p2g-fcmc-qvqq"
+  ],
+  "allowedPackages": [
+    "image-size",
+    "metro",
+    "metro-config",
+    "metro-transform-worker",
+    "@react-native/community-cli-plugin",
+    "react-native",
+    "@react-native/virtualized-lists"
+  ],
+  "rationale": "React Native 0.87 pulls Metro 0.87, which pulls image-size 1.2.1. The two listed image-size infinite-loop DoS advisories have no patched upstream image-size release as of 2026-08-25. The known exposure is in the Node/Metro bundling toolchain, not the app's media import/render path. Keep this exception narrow and temporary; any new high/critical advisory or package fanout must fail CI."
+}
