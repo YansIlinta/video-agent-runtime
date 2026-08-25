@@ -64,7 +64,7 @@ A typical interaction looks like:
 ```text
 Import interview.mp4
 ↓
-"剪成一分钟，开头抓人，删掉废话"
+"剪成一分钟，开头抓人。"
 ↓
 Agent proposes a hook-first strategy
 ↓
