@@ -6,6 +6,8 @@
     "start": "react-native start",
     "ios": "react-native run-ios",
     "android": "react-native run-android",
+    "pods:ios": "cd ios && pod install",
+    "build:ios": "cd ios && xcodebuild -workspace VideoAgentMobile.xcworkspace -scheme VideoAgentMobile -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
     "codegen:android": "cd android && sh ./gradlew :app:generateCodegenArtifactsFromSchema --no-daemon",
     "build:android": "cd android && sh ./gradlew :app:assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon",
     "typecheck": "tsc --noEmit"
