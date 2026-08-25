@@ -56,7 +56,8 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0" \
             "ndk;27.1.12297006"
-      - name: Generate React Native Android codegen
-        run: npm --prefix apps/mobile run codegen:android
+      # assembleDebug runs the React Native Codegen tasks as dependencies. Keep
+      # codegen:android as a local diagnostic command instead of paying for a
+      # second Gradle/plugin startup on every CI run.
       - name: Compile Android native host
         run: npm --prefix apps/mobile run build:android
