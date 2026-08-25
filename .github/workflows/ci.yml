@@ -61,3 +61,23 @@ jobs:
       # second Gradle/plugin startup on every CI run.
       - name: Compile Android native host
         run: npm --prefix apps/mobile run build:android
+
+  ios-native:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm --prefix apps/mobile ci
+      - name: Show Apple toolchain
+        run: |
+          xcodebuild -version
+          pod --version
+      - name: Install React Native iOS pods and generate Codegen
+        run: npm --prefix apps/mobile run pods:ios
+      - name: Compile iOS native host
+        run: npm --prefix apps/mobile run build:ios
